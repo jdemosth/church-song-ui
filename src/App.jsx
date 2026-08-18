@@ -3651,7 +3651,7 @@ function App() {
         )}
 
         {activeView === 'operator' && (
-          <>
+          <div className="operator-view">
             <header className="service-header">
               <div>
                 <p className="page-kicker">
@@ -3825,15 +3825,6 @@ function App() {
                       }
                     >
                       Manage
-                    </button>
-
-                    <button
-                      className="button button-secondary inline-button"
-                      onClick={
-                        openSaveServiceModal
-                      }
-                    >
-                      Save as Service Plan
                     </button>
                   </div>
                 </div>
@@ -4251,6 +4242,24 @@ function App() {
                         </div>
                       </div>
 
+                    </>
+                  )}
+                </div>
+
+                <div className="preview-title-row">
+                  <div>
+                    <p className="card-kicker">
+                      Projector Preview
+                    </p>
+
+                    <strong>
+                      {currentSection?.name ||
+                        'Ready'}
+                    </strong>
+                  </div>
+
+                  <div className="preview-header-actions">
+                    {currentSong && (
                       <div className="current-actions">
                         <button
                           className="button button-secondary"
@@ -4275,26 +4284,13 @@ function App() {
                           Send to Projector
                         </button>
                       </div>
-                    </>
-                  )}
-                </div>
+                    )}
 
-                <div className="preview-title-row">
-                  <div>
-                    <p className="card-kicker">
-                      Projector Preview
-                    </p>
+                    <div className="live-indicator">
+                      <span className="green-dot" />
 
-                    <strong>
-                      {currentSection?.name ||
-                        'Ready'}
-                    </strong>
-                  </div>
-
-                  <div className="live-indicator">
-                    <span className="green-dot" />
-
-                    {projectionMode}
+                      {projectionMode}
+                    </div>
                   </div>
                 </div>
 
@@ -4489,11 +4485,11 @@ function App() {
                 </p>
               </section>
             </div>
-          </>
+          </div>
         )}
 
         {activeView === 'songs' && (
-          <>
+          <div className="admin-view">
             <header className="service-header">
               <div>
                 <p className="page-kicker">
@@ -4531,7 +4527,7 @@ function App() {
             </header>
 
             <div className="songs-management-grid">
-              <section className="console-card">
+              <section className="console-card song-library-card">
                 <div className="card-header">
                   <div>
                     <p className="card-kicker">
@@ -4662,6 +4658,7 @@ function App() {
                   )}
                 </div>
 
+                <div className="song-detail-body">
                 {selectedSong ? (
                   <>
                     <div className="song-detail-meta">
@@ -4725,13 +4722,14 @@ function App() {
                     delete it.
                   </div>
                 )}
+                </div>
               </section>
             </div>
-          </>
+          </div>
         )}
 
         {activeView === 'playlists' && (
-          <>
+          <div className="admin-view">
             <header className="service-header">
               <div>
                 <p className="page-kicker">
@@ -4741,7 +4739,7 @@ function App() {
                 <h2>Manage Playlists</h2>
 
                 <p className="header-description">
-                  Create service plans, organize
+                  Create playlists, organize
                   songs, and choose the active
                   playlist for worship.
                 </p>
@@ -4760,7 +4758,7 @@ function App() {
             </header>
 
             <div className="playlists-management-grid">
-              <section className="console-card">
+              <section className="console-card playlist-list-card">
                 <div className="card-header">
                   <div>
                     <p className="card-kicker">
@@ -4889,52 +4887,54 @@ function App() {
                   </div>
                 </div>
 
+                <div className="playlist-detail-body">
                 {managedPlaylist ? (
                   <>
-                    <div className="playlist-metadata-form">
-                      <label className="playlist-metadata-field">
-                        <span>Name</span>
-                        <input
-                          type="text"
-                          name="name"
-                          value={
-                            savedPlaylistMetadataForm.name
-                          }
-                          onChange={
-                            handleSavedPlaylistMetadataChange
-                          }
-                        />
-                      </label>
+                    <div className="playlist-detail-top">
+                      <div className="playlist-meta-row">
+                        <label className="playlist-metadata-field">
+                          <span>Name</span>
+                          <input
+                            type="text"
+                            name="name"
+                            value={
+                              savedPlaylistMetadataForm.name
+                            }
+                            onChange={
+                              handleSavedPlaylistMetadataChange
+                            }
+                          />
+                        </label>
 
-                      <label className="playlist-metadata-field">
-                        <span>Service Date</span>
-                        <input
-                          type="date"
-                          name="serviceDate"
-                          value={
-                            savedPlaylistMetadataForm.serviceDate
-                          }
-                          onChange={
-                            handleSavedPlaylistMetadataChange
-                          }
-                        />
-                      </label>
+                        <label className="playlist-metadata-field">
+                          <span>Service Date</span>
+                          <input
+                            type="date"
+                            name="serviceDate"
+                            value={
+                              savedPlaylistMetadataForm.serviceDate
+                            }
+                            onChange={
+                              handleSavedPlaylistMetadataChange
+                            }
+                          />
+                        </label>
 
-                      <label className="playlist-metadata-field">
-                        <span>Theme (optional)</span>
-                        <input
-                          type="text"
-                          name="theme"
-                          placeholder="Optional"
-                          value={
-                            savedPlaylistMetadataForm.theme
-                          }
-                          onChange={
-                            handleSavedPlaylistMetadataChange
-                          }
-                        />
-                      </label>
-                    </div>
+                        <label className="playlist-metadata-field">
+                          <span>Theme</span>
+                          <input
+                            type="text"
+                            name="theme"
+                            placeholder="Optional"
+                            value={
+                              savedPlaylistMetadataForm.theme
+                            }
+                            onChange={
+                              handleSavedPlaylistMetadataChange
+                            }
+                          />
+                        </label>
+                      </div>
 
                     <div className="service-plan-detail-actions">
                       <button
@@ -4966,14 +4966,15 @@ function App() {
                         Delete
                       </button>
                     </div>
+                    </div>
 
-                    <div className="playlist-library-layout">
-                      <div>
+                    <div className="playlist-library-layout playlist-song-workspace">
+                      <div className="playlist-songs-panel">
                         <p className="small-title">
                           Playlist Songs
                         </p>
 
-                        <div className="service-song-list">
+                        <div className="service-song-list playlist-songs-list">
                           {managedPlaylistSongs.map(
                             (song, index) => (
                               <div
@@ -5059,7 +5060,7 @@ function App() {
                         </div>
                       </div>
 
-                      <div>
+                      <div className="playlist-library-panel">
                         <p className="small-title">
                           Song Library
                         </p>
@@ -5107,7 +5108,7 @@ function App() {
                           ))}
                         </div>
 
-                        <div className="song-list">
+                        <div className="song-list playlist-library-song-list">
                           {filteredSongs.map(
                             (song) => {
                               const alreadyInPlaylist =
@@ -5212,10 +5213,11 @@ function App() {
                     load it into service.
                   </div>
                 )}
+                </div>
               </section>
             </div>
 
-          </>
+          </div>
         )}
 
         {activeView === 'settings' && (
