@@ -201,6 +201,50 @@ function formatFullDateLabel(serviceDate) {
   })
 }
 
+function formatShortDateLabel(serviceDate) {
+  if (!serviceDate) {
+    return 'No date'
+  }
+
+  const [year, month, day] =
+    serviceDate.split('-').map(Number)
+
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day)
+  ) {
+    return serviceDate
+  }
+
+  const date = new Date(
+    year,
+    month - 1,
+    day
+  )
+
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
+
+function formatPlaylistDisplayName(playlist) {
+  if (!playlist) {
+    return ''
+  }
+
+  if (
+    playlist.reusable === false &&
+    playlist.serviceDate
+  ) {
+    return `${playlist.name} — ${formatShortDateLabel(playlist.serviceDate)}`
+  }
+
+  return playlist.name || ''
+}
+
 function getProjectorWindowState() {
   if (typeof window === 'undefined') {
     return false
@@ -780,6 +824,10 @@ function App() {
   ] = useState(null)
 
   const [search, setSearch] = useState('')
+  const [
+    playlistSearch,
+    setPlaylistSearch,
+  ] = useState('')
   const [typeFilter, setTypeFilter] =
     useState('ALL')
 
@@ -816,6 +864,10 @@ function App() {
   const [
     showUseForTodayModal,
     setShowUseForTodayModal,
+  ] = useState(false)
+  const [
+    showSavedPlaylistModal,
+    setShowSavedPlaylistModal,
   ] = useState(false)
 
   const [
@@ -958,13 +1010,37 @@ function App() {
     )
   )
   const [
-    newPlaylistName,
-    setNewPlaylistName,
+    managedPlaylistId,
+    setManagedPlaylistId,
+  ] = useState(null)
+  const [
+    prioritizedManagedPlaylistId,
+    setPrioritizedManagedPlaylistId,
+  ] = useState(null)
+  const [
+    savedPlaylistCreationMode,
+    setSavedPlaylistCreationMode,
+  ] = useState('NEW')
+  const [
+    savedPlaylistSourceId,
+    setSavedPlaylistSourceId,
   ] = useState('')
   const [
-    renamePlaylistName,
-    setRenamePlaylistName,
-  ] = useState('')
+    savedPlaylistForm,
+    setSavedPlaylistForm,
+  ] = useState({
+    name: '',
+    serviceDate: getTodayDateValue(),
+    theme: '',
+  })
+  const [
+    savedPlaylistMetadataForm,
+    setSavedPlaylistMetadataForm,
+  ] = useState({
+    name: '',
+    serviceDate: '',
+    theme: '',
+  })
   const [
     useForTodaySourcePlaylistId,
     setUseForTodaySourcePlaylistId,
@@ -1364,6 +1440,9 @@ function App() {
       const reusablePlaylistList = data.filter(
         (playlist) => playlist.reusable !== false
       )
+      const savedPlaylistList = data.filter(
+        (playlist) => playlist.reusable === false
+      )
       const defaultPlaylist =
         reusablePlaylistList[0] || data[0] || null
 
@@ -1396,6 +1475,24 @@ function App() {
           ? current
           : reusablePlaylistList[0]?.id || null
       })
+
+      setManagedPlaylistId((current) => {
+        const defaultPlaylist =
+          reusablePlaylistList[0] ||
+          savedPlaylistList[0] ||
+          null
+
+        if (current == null) {
+          return defaultPlaylist?.id || null
+        }
+
+        return data.some(
+          (playlist) => playlist.id === current
+        )
+          ? current
+          : defaultPlaylist?.id || null
+      })
+
     } catch (err) {
       setError(err.message)
     }
@@ -1479,6 +1576,90 @@ function App() {
       ),
     [playlists]
   )
+  const savedServicePlaylists = useMemo(
+    () =>
+      playlists
+        .filter(
+          (playlist) => playlist.reusable === false
+        )
+        .sort((left, right) =>
+          (right.serviceDate || '').localeCompare(
+            left.serviceDate || ''
+          ) || left.name.localeCompare(right.name)
+        ),
+    [playlists]
+  )
+  const managedPlaylists = useMemo(
+    () => {
+      const orderedPlaylists = [
+        ...reusablePlaylists,
+        ...savedServicePlaylists,
+      ]
+
+      if (prioritizedManagedPlaylistId == null) {
+        return orderedPlaylists
+      }
+
+      const prioritizedIndex =
+        orderedPlaylists.findIndex(
+          (playlist) =>
+            playlist.id ===
+            prioritizedManagedPlaylistId
+        )
+
+      if (prioritizedIndex <= 0) {
+        return orderedPlaylists
+      }
+
+      const prioritizedPlaylist =
+        orderedPlaylists[prioritizedIndex]
+
+      return [
+        prioritizedPlaylist,
+        ...orderedPlaylists.filter(
+          (playlist) =>
+            playlist.id !==
+            prioritizedManagedPlaylistId
+        ),
+      ]
+    },
+    [
+      reusablePlaylists,
+      savedServicePlaylists,
+      prioritizedManagedPlaylistId,
+    ]
+  )
+  const filteredManagedPlaylists = useMemo(() => {
+    const text =
+      playlistSearch.trim().toLowerCase()
+
+    if (!text) {
+      return managedPlaylists
+    }
+
+    return managedPlaylists.filter((playlist) => {
+      const searchableValues = [
+        playlist.name || '',
+        playlist.theme || '',
+        playlist.serviceDate || '',
+        formatShortDateLabel(
+          playlist.serviceDate
+        ),
+        formatFullDateLabel(
+          playlist.serviceDate
+        ),
+        formatServiceDate(
+          playlist.serviceDate
+        ),
+      ]
+
+      return searchableValues.some((value) =>
+        String(value)
+          .toLowerCase()
+          .includes(text)
+      )
+    })
+  }, [managedPlaylists, playlistSearch])
   const selectedSongWorkingPlaylists = useMemo(() => {
     if (!selectedSong) {
       return []
@@ -1519,6 +1700,13 @@ function App() {
     reusablePlaylists.find(
       (playlist) => playlist.id === openedPlaylistId
     ) || null
+  const managedPlaylist =
+    managedPlaylists.find(
+      (playlist) =>
+        playlist.id === managedPlaylistId
+    ) || null
+  const managedPlaylistIsSaved =
+    managedPlaylist?.reusable === false
   const openedServicePlan =
     servicePlans.find(
       (servicePlan) =>
@@ -1533,6 +1721,20 @@ function App() {
   const openedPlaylistSongs =
     (
       openedPlaylist?.songs || []
+    ).filter((song) => song != null)
+  const managedPlaylistSongs =
+    (
+      managedPlaylist?.songs || []
+    ).filter((song) => song != null)
+  const savedPlaylistSource =
+    playlists.find(
+      (playlist) =>
+        playlist.id ===
+        Number(savedPlaylistSourceId)
+    ) || null
+  const savedPlaylistSourceSongs =
+    (
+      savedPlaylistSource?.songs || []
     ).filter((song) => song != null)
   const openedServicePlanSongs =
     (
@@ -1639,10 +1841,18 @@ function App() {
     selectedSongServicePlanNames.length
 
   useEffect(() => {
-    setRenamePlaylistName(
-      openedPlaylist?.name || ''
-    )
-  }, [openedPlaylist?.id, openedPlaylist?.name])
+    setSavedPlaylistMetadataForm({
+      name: managedPlaylist?.name || '',
+      serviceDate:
+        managedPlaylist?.serviceDate || '',
+      theme: managedPlaylist?.theme || '',
+    })
+  }, [
+    managedPlaylist?.id,
+    managedPlaylist?.name,
+    managedPlaylist?.serviceDate,
+    managedPlaylist?.theme,
+  ])
 
   useEffect(() => {
     setServicePlanForm({
@@ -2403,52 +2613,146 @@ function App() {
     setLoadedServicePlanId(null)
   }
 
-  async function createPlaylist() {
-    const trimmedName = newPlaylistName.trim()
+  function openNewSavedPlaylistModal() {
+    setError('')
+    setSuccessMessage('')
+    setSavedPlaylistCreationMode('NEW')
+    setSavedPlaylistSourceId('')
+    setSavedPlaylistForm({
+      name: '',
+      serviceDate: getTodayDateValue(),
+      theme: '',
+    })
+    setShowSavedPlaylistModal(true)
+  }
 
-    if (!trimmedName) {
-      setError('Playlist name is required')
+  function openCopySavedPlaylistModal(
+    sourcePlaylist =
+      managedPlaylist ||
+      openedPlaylist ||
+      selectedPlaylist
+  ) {
+    setError('')
+    setSuccessMessage('')
+    setSavedPlaylistCreationMode('COPY')
+    setSavedPlaylistSourceId(
+      sourcePlaylist?.id ? String(sourcePlaylist.id) : ''
+    )
+    setSavedPlaylistForm({
+      name: '',
+      serviceDate: getTodayDateValue(),
+      theme: sourcePlaylist?.theme || '',
+    })
+    setShowSavedPlaylistModal(true)
+  }
+
+  function closeSavedPlaylistModal() {
+    setShowSavedPlaylistModal(false)
+    setSavedPlaylistSourceId('')
+  }
+
+  function handleSavedPlaylistFormChange(event) {
+    const { name, value } = event.target
+
+    setSavedPlaylistForm((current) => ({
+      ...current,
+      [name]: value,
+    }))
+  }
+
+  function handleSavedPlaylistSourceChange(event) {
+    const nextSourceId = event.target.value
+    const nextSourcePlaylist =
+      playlists.find(
+        (playlist) =>
+          String(playlist.id) === nextSourceId
+      ) || null
+
+    setSavedPlaylistSourceId(nextSourceId)
+    setSavedPlaylistForm((current) => ({
+      ...current,
+      theme: nextSourcePlaylist?.theme || '',
+    }))
+  }
+
+  function handleSavedPlaylistMetadataChange(event) {
+    const { name, value } = event.target
+
+    setSavedPlaylistMetadataForm((current) => ({
+      ...current,
+      [name]: value,
+    }))
+  }
+
+  async function createSavedPlaylist() {
+    const name = savedPlaylistForm.name.trim()
+    const serviceDate =
+      savedPlaylistForm.serviceDate.trim()
+    const theme = savedPlaylistForm.theme.trim()
+    const copyingPlaylist =
+      savedPlaylistCreationMode === 'COPY'
+
+    if (!name || !serviceDate) {
+      setError('Saved playlist name and date are required')
+      return
+    }
+
+    if (copyingPlaylist && !savedPlaylistSource) {
+      setError('Choose a source playlist to copy')
       return
     }
 
     try {
       setError('')
+      setSuccessMessage('')
 
-      const response = await fetch(
-        'http://localhost:8080/playlists',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type':
-              'application/json',
-          },
-          body: JSON.stringify({
-            name: trimmedName,
-          }),
-        }
-      )
+      const endpoint = copyingPlaylist
+        ? `http://localhost:8080/playlists/${savedPlaylistSource.id}/copy`
+        : 'http://localhost:8080/playlists/saved-service'
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name,
+          serviceDate,
+          theme,
+        }),
+      })
 
       if (!response.ok) {
-        const message =
-          await readErrorMessage(response)
+        const message = await readErrorMessage(response)
 
         throw new Error(
-          message ||
-            'Failed to create playlist'
+          message || 'Failed to create saved playlist'
         )
       }
 
-      const createdPlaylist =
-        await response.json()
+      const createdPlaylist = await response.json()
+      const refreshedResponse = await fetch(
+        'http://localhost:8080/playlists'
+      )
 
-      setPlaylists((current) => [
-        ...current,
-        createdPlaylist,
-      ])
-      setOpenedPlaylistId(createdPlaylist.id)
-      setNewPlaylistName('')
+      if (!refreshedResponse.ok) {
+        throw new Error(
+          'Failed to refresh playlists after creating playlist'
+        )
+      }
+
+      const refreshedPlaylists =
+        await refreshedResponse.json()
+
+      setPlaylists(refreshedPlaylists)
+      setManagedPlaylistId(createdPlaylist.id)
+      setPrioritizedManagedPlaylistId(
+        createdPlaylist.id
+      )
+      closeSavedPlaylistModal()
       setSuccessMessage(
-        `Created reusable playlist "${createdPlaylist.name}".`
+        copyingPlaylist
+          ? `Created saved playlist "${createdPlaylist.name}" from "${savedPlaylistSource.name}".`
+          : `Created empty saved playlist "${createdPlaylist.name}".`
       )
     } catch (err) {
       setError(err.message)
@@ -2456,15 +2760,23 @@ function App() {
     }
   }
 
-  async function renameOpenedPlaylist() {
-    if (!openedPlaylist) {
+  async function saveManagedPlaylistMetadata() {
+    if (!managedPlaylist) {
       return
     }
 
-    const trimmedName = renamePlaylistName.trim()
+    const name = savedPlaylistMetadataForm.name.trim()
+    const serviceDate =
+      savedPlaylistMetadataForm.serviceDate.trim()
+    const theme = savedPlaylistMetadataForm.theme.trim()
 
-    if (!trimmedName) {
+    if (!name) {
       setError('Playlist name is required')
+      return
+    }
+
+    if (managedPlaylistIsSaved && !serviceDate) {
+      setError('Service date is required')
       return
     }
 
@@ -2472,31 +2784,29 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/playlists/${openedPlaylist.id}/rename`,
+        `http://localhost:8080/playlists/${managedPlaylist.id}/metadata`,
         {
           method: 'PUT',
           headers: {
-            'Content-Type':
-              'application/json',
+            'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            name: trimmedName,
+            name,
+            serviceDate,
+            theme,
           }),
         }
       )
 
       if (!response.ok) {
-        const message =
-          await readErrorMessage(response)
+        const message = await readErrorMessage(response)
 
         throw new Error(
-          message ||
-            'Failed to rename playlist'
+          message || 'Failed to update playlist'
         )
       }
 
-      const updatedPlaylist =
-        await response.json()
+      const updatedPlaylist = await response.json()
 
       setPlaylists((current) =>
         current.map((playlist) =>
@@ -2510,20 +2820,43 @@ function App() {
         setSelectedPlaylist(updatedPlaylist)
       }
 
-      setOpenedPlaylistId(updatedPlaylist.id)
-      setRenamePlaylistName(updatedPlaylist.name)
+      setManagedPlaylistId(updatedPlaylist.id)
+      setSuccessMessage(
+        `Updated playlist "${updatedPlaylist.name}".`
+      )
     } catch (err) {
       setError(err.message)
+      setSuccessMessage('')
     }
   }
 
-  async function deleteOpenedPlaylist() {
-    if (!openedPlaylist) {
+  function makePlaylistActiveAndReturnToConsole(
+    playlist = managedPlaylist
+  ) {
+    if (!playlist) {
+      return
+    }
+
+    setManagedPlaylistId(playlist.id)
+    setSelectedPlaylist(playlist)
+    setLoadedServicePlanId(null)
+    setSelectedSong(null)
+    setCurrentSong(null)
+    setProjectionSong(null)
+    setSectionIndex(0)
+    setActiveView('operator')
+    setSuccessMessage(
+      `Made playlist "${playlist.name}" active in the Worship Console.`
+    )
+  }
+
+  async function deleteManagedPlaylist() {
+    if (!managedPlaylist) {
       return
     }
 
     const confirmed = window.confirm(
-      `Delete playlist "${openedPlaylist.name}"?`
+      `Delete playlist "${managedPlaylist.name}"?`
     )
 
     if (!confirmed) {
@@ -2533,13 +2866,8 @@ function App() {
     try {
       setError('')
 
-      const playlistName =
-        encodeURIComponent(
-          openedPlaylist.name
-        )
-
       const response = await fetch(
-        `http://localhost:8080/playlists?name=${playlistName}`,
+        `http://localhost:8080/playlists/${managedPlaylist.id}`,
         {
           method: 'DELETE',
         }
@@ -2557,41 +2885,55 @@ function App() {
 
       const remainingPlaylists = playlists.filter(
         (playlist) =>
-          playlist.id !== openedPlaylist.id
+          playlist.id !== managedPlaylist.id
       )
       const remainingReusablePlaylists =
         remainingPlaylists.filter(
           (playlist) =>
             playlist.reusable !== false
         )
+      const remainingSavedPlaylists =
+        remainingPlaylists.filter(
+          (playlist) =>
+            playlist.reusable === false
+        )
+      const defaultManagedPlaylist =
+        remainingReusablePlaylists[0] ||
+        remainingSavedPlaylists[0] ||
+        null
 
       setPlaylists(remainingPlaylists)
 
-      if (selectedPlaylist?.id === openedPlaylist.id) {
-        setSelectedPlaylist(
-          remainingReusablePlaylists[0] || null
-        )
+      if (selectedPlaylist?.id === managedPlaylist.id) {
+        setSelectedPlaylist(null)
       }
 
-      setOpenedPlaylistId(
-        remainingReusablePlaylists[0]?.id ||
-          null
-      )
-      setRenamePlaylistName('')
+      setManagedPlaylistId(null)
+      if (openedPlaylistId === managedPlaylist.id) {
+        setOpenedPlaylistId(null)
+      }
+      if (prioritizedManagedPlaylistId === managedPlaylist.id) {
+        setPrioritizedManagedPlaylistId(null)
+      }
     } catch (err) {
       setError(err.message)
     }
   }
 
-  function openUseForTodayModal() {
-    if (!openedPlaylist) {
+  function openUseForTodayModal(
+    sourcePlaylist = managedPlaylist
+  ) {
+    if (
+      !sourcePlaylist ||
+      sourcePlaylist.reusable === false
+    ) {
       return
     }
 
     setError('')
     setSuccessMessage('')
     setUseForTodaySourcePlaylistId(
-      openedPlaylist.id
+      sourcePlaylist.id
     )
     setUseForTodayForm({
       name: buildTodayServiceName(
@@ -3527,9 +3869,9 @@ function App() {
                             playlist.id
                           }
                         >
-                          {playlist.reusable === false
-                            ? `Working Service: ${playlist.name}`
-                            : playlist.name}
+                          {formatPlaylistDisplayName(
+                            playlist
+                          )}
                         </option>
                       )
                     )}
@@ -4422,67 +4764,94 @@ function App() {
                 <div className="card-header">
                   <div>
                     <p className="card-kicker">
-                      Reusable Playlists
+                      Manage Playlist
                     </p>
 
-                    <h3>All Reusable Playlists</h3>
+                    <h3>All Playlists</h3>
                   </div>
 
                   <span className="number-pill">
-                    {reusablePlaylists.length}
+                    {playlistSearch.trim()
+                      ? `${filteredManagedPlaylists.length} of ${managedPlaylists.length}`
+                      : managedPlaylists.length}
                   </span>
                 </div>
 
-                <div className="playlist-create-row">
+                <div className="search-wrapper">
+                  <span>⌕</span>
+
                   <input
                     type="text"
-                    placeholder="New playlist name"
-                    value={newPlaylistName}
+                    placeholder="Search playlists..."
+                    value={playlistSearch}
                     onChange={(event) =>
-                      setNewPlaylistName(
+                      setPlaylistSearch(
                         event.target.value
                       )
                     }
                   />
+                </div>
 
+                <div className="playlist-create-row">
                   <button
                     className="button button-primary"
-                    onClick={createPlaylist}
+                    onClick={openNewSavedPlaylistModal}
                   >
-                    Create
+                    Create New Playlist
+                  </button>
+
+                  <button
+                    className="button button-secondary"
+                    onClick={() =>
+                      openCopySavedPlaylistModal(
+                        managedPlaylist ||
+                          selectedPlaylist
+                      )
+                    }
+                  >
+                    Duplicate Playlist
                   </button>
                 </div>
 
                 <div className="playlist-management-list">
-                  {reusablePlaylists.map(
+                  {filteredManagedPlaylists.map(
                     (playlist) => (
                     <button
                       key={playlist.id}
                       className={
-                        openedPlaylistId ===
+                        managedPlaylistId ===
                         playlist.id
                           ? 'playlist-management-item active'
                           : 'playlist-management-item'
                       }
-                      onClick={() =>
+                      onClick={() => {
+                        setManagedPlaylistId(
+                          playlist.id
+                        )
+                        if (
+                          playlist.reusable ===
+                          false
+                        ) {
+                          return
+                        }
+
                         setOpenedPlaylistId(
                           playlist.id
                         )
-                      }
+                      }}
                     >
                       <div className="playlist-management-copy">
                         <strong>
-                          {playlist.name}
+                          {playlist.reusable === false &&
+                          playlist.serviceDate
+                            ? `${playlist.name} — ${formatShortDateLabel(playlist.serviceDate)}`
+                            : playlist.name}
                         </strong>
 
                         <span>
-                          {(
-                            playlist.songs || []
-                          ).filter(
-                            (song) =>
-                              song != null
-                          ).length}{' '}
-                          songs
+                          {playlist.reusable === false
+                            ? `${playlist.theme || 'No theme'} • ${(playlist.songs || []).filter((song) => song != null).length} songs`
+                            : `Reusable playlist • ${(playlist.songs || []).filter((song) => song != null).length} songs`}
                         </span>
                       </div>
 
@@ -4496,11 +4865,11 @@ function App() {
                     )
                   )}
 
-                  {reusablePlaylists.length ===
+                  {filteredManagedPlaylists.length ===
                     0 && (
                     <div className="empty-state">
-                      Create a playlist to start
-                      building a service order.
+                      No playlists match this
+                      search.
                     </div>
                   )}
                 </div>
@@ -4514,48 +4883,84 @@ function App() {
                     </p>
 
                     <h3>
-                      {openedPlaylist?.name ||
+                      {managedPlaylist?.name ||
                         'Select a Playlist'}
                     </h3>
                   </div>
-
-                  {openedPlaylist && (
-                    <button
-                      className="button button-primary"
-                      onClick={openUseForTodayModal}
-                    >
-                      Use for Today’s Service
-                    </button>
-                  )}
                 </div>
 
-                {openedPlaylist ? (
+                {managedPlaylist ? (
                   <>
-                    <div className="playlist-create-row">
-                      <input
-                        type="text"
-                        placeholder="Rename playlist"
-                        value={renamePlaylistName}
-                        onChange={(event) =>
-                          setRenamePlaylistName(
-                            event.target.value
-                          )
-                        }
-                      />
+                    <div className="playlist-metadata-form">
+                      <label className="playlist-metadata-field">
+                        <span>Name</span>
+                        <input
+                          type="text"
+                          name="name"
+                          value={
+                            savedPlaylistMetadataForm.name
+                          }
+                          onChange={
+                            handleSavedPlaylistMetadataChange
+                          }
+                        />
+                      </label>
 
+                      <label className="playlist-metadata-field">
+                        <span>Service Date</span>
+                        <input
+                          type="date"
+                          name="serviceDate"
+                          value={
+                            savedPlaylistMetadataForm.serviceDate
+                          }
+                          onChange={
+                            handleSavedPlaylistMetadataChange
+                          }
+                        />
+                      </label>
+
+                      <label className="playlist-metadata-field">
+                        <span>Theme (optional)</span>
+                        <input
+                          type="text"
+                          name="theme"
+                          placeholder="Optional"
+                          value={
+                            savedPlaylistMetadataForm.theme
+                          }
+                          onChange={
+                            handleSavedPlaylistMetadataChange
+                          }
+                        />
+                      </label>
+                    </div>
+
+                    <div className="service-plan-detail-actions">
                       <button
                         className="button button-secondary"
                         onClick={
-                          renameOpenedPlaylist
+                          saveManagedPlaylistMetadata
                         }
                       >
-                        Rename
+                        Save
+                      </button>
+
+                      <button
+                        className="button button-primary"
+                        onClick={() =>
+                          makePlaylistActiveAndReturnToConsole(
+                            managedPlaylist
+                          )
+                        }
+                      >
+                        Make Active & Return to Console
                       </button>
 
                       <button
                         className="button button-danger"
                         onClick={
-                          deleteOpenedPlaylist
+                          deleteManagedPlaylist
                         }
                       >
                         Delete
@@ -4569,10 +4974,10 @@ function App() {
                         </p>
 
                         <div className="service-song-list">
-                          {openedPlaylistSongs.map(
+                          {managedPlaylistSongs.map(
                             (song, index) => (
                               <div
-                                key={`${openedPlaylist.id}-${song.id}-${index}`}
+                                key={`${managedPlaylist.id}-${song.id}-${index}`}
                                 className="service-song selected"
                               >
                                 <span className="song-order">
@@ -4600,7 +5005,7 @@ function App() {
                                       moveSongInPlaylist(
                                         index,
                                         index - 1,
-                                        openedPlaylist
+                                        managedPlaylist
                                       )
                                     }
                                     title="Move song up"
@@ -4612,14 +5017,14 @@ function App() {
                                     className="move-song-button"
                                     disabled={
                                       index ===
-                                      openedPlaylistSongs.length -
+                                      managedPlaylistSongs.length -
                                         1
                                     }
                                     onClick={() =>
                                       moveSongInPlaylist(
                                         index,
                                         index + 1,
-                                        openedPlaylist
+                                        managedPlaylist
                                       )
                                     }
                                     title="Move song down"
@@ -4632,7 +5037,7 @@ function App() {
                                     onClick={() =>
                                       removeSongFromPlaylist(
                                         song,
-                                        openedPlaylist
+                                        managedPlaylist
                                       )
                                     }
                                     title="Remove from playlist"
@@ -4644,7 +5049,7 @@ function App() {
                             )
                           )}
 
-                          {openedPlaylistSongs.length ===
+                          {managedPlaylistSongs.length ===
                             0 && (
                             <div className="empty-state">
                               This playlist is
@@ -4706,7 +5111,7 @@ function App() {
                           {filteredSongs.map(
                             (song) => {
                               const alreadyInPlaylist =
-                                openedPlaylistSongs.some(
+                                managedPlaylistSongs.some(
                                   (
                                     playlistSong
                                   ) =>
@@ -4716,7 +5121,7 @@ function App() {
 
                               return (
                                 <div
-                                  key={`${openedPlaylist.id}-library-${song.id}`}
+                                  key={`${managedPlaylist.id}-library-${song.id}`}
                                   className={
                                     selectedSong?.id ===
                                     song.id
@@ -4774,7 +5179,7 @@ function App() {
                                       ) => {
                                         event.stopPropagation()
                                         addSongToPlaylist(
-                                          openedPlaylist,
+                                          managedPlaylist,
                                           song
                                         )
                                       }}
@@ -4802,258 +5207,14 @@ function App() {
                   </>
                 ) : (
                   <div className="empty-state">
-                    Choose a playlist to rename,
-                    fill with songs, or mark as
-                    active for service.
+                    Choose a playlist to edit its
+                    metadata, manage songs, or
+                    load it into service.
                   </div>
                 )}
               </section>
             </div>
 
-            <div className="service-plans-management-grid">
-              <section className="console-card">
-                <div className="card-header">
-                  <div>
-                    <p className="card-kicker">
-                      Upcoming Services
-                    </p>
-
-                    <h3>
-                      Dated Service Plans
-                    </h3>
-                  </div>
-
-                  <span className="number-pill">
-                    {upcomingServicePlans.length}
-                  </span>
-                </div>
-
-                <div className="playlist-create-row">
-                  <button
-                    className="button button-primary"
-                    onClick={() =>
-                      openSaveServiceModal(
-                        openedPlaylist ||
-                          selectedPlaylist
-                      )
-                    }
-                  >
-                    New Service Plan
-                  </button>
-                </div>
-
-                <div className="playlist-management-list">
-                  {upcomingServicePlans.map(
-                    (servicePlan) => (
-                      <button
-                        key={servicePlan.id}
-                        className={
-                          openedServicePlanId ===
-                          servicePlan.id
-                            ? 'playlist-management-item active'
-                            : 'playlist-management-item'
-                        }
-                        onClick={() =>
-                          setOpenedServicePlanId(
-                            servicePlan.id
-                          )
-                        }
-                      >
-                        <div className="playlist-management-copy">
-                          <strong>
-                            {
-                              servicePlan.serviceName
-                            }
-                          </strong>
-
-                          <span>
-                            {formatServiceSchedule(
-                              servicePlan
-                            )}{' '}
-                            •{' '}
-                            {(
-                              servicePlan.songs ||
-                              []
-                            ).filter(
-                              (song) =>
-                                song != null
-                            ).length}{' '}
-                            songs
-                          </span>
-                        </div>
-
-                        {loadedServicePlanId ===
-                          servicePlan.id && (
-                          <span className="active-playlist-badge">
-                            Loaded
-                          </span>
-                        )}
-                      </button>
-                    )
-                  )}
-
-                  {upcomingServicePlans.length ===
-                    0 && (
-                    <div className="empty-state">
-                      No service plans have been
-                      saved yet.
-                    </div>
-                  )}
-                </div>
-              </section>
-
-              <section className="console-card playlist-detail-card">
-                <div className="card-header">
-                  <div>
-                    <p className="card-kicker">
-                      Service Plan Details
-                    </p>
-
-                    <h3>
-                      {openedServicePlan
-                        ?.serviceName ||
-                        'Select a Service'}
-                    </h3>
-                  </div>
-
-                  {openedServicePlan && (
-                    <button
-                      className="button button-primary"
-                      onClick={() =>
-                        openServicePlanInConsole(
-                          openedServicePlan
-                        )
-                      }
-                    >
-                      {loadedServicePlanId ===
-                      openedServicePlan.id
-                        ? 'Loaded in Console'
-                        : 'Open in Console'}
-                    </button>
-                  )}
-                </div>
-
-                {openedServicePlan ? (
-                  <>
-                    <div className="service-plan-meta-grid">
-                      <input
-                        type="text"
-                        name="serviceName"
-                        placeholder="Service name"
-                        value={
-                          servicePlanForm.serviceName
-                        }
-                        onChange={
-                          handleServicePlanFormChange
-                        }
-                      />
-
-                      <input
-                        type="date"
-                        name="serviceDate"
-                        value={
-                          servicePlanForm.serviceDate
-                        }
-                        onChange={
-                          handleServicePlanFormChange
-                        }
-                      />
-
-                      <input
-                        type="time"
-                        name="serviceTime"
-                        value={
-                          servicePlanForm.serviceTime
-                        }
-                        onChange={
-                          handleServicePlanFormChange
-                        }
-                      />
-                    </div>
-
-                    <div className="service-plan-detail-actions">
-                      <button
-                        className="button button-secondary"
-                        onClick={
-                          updateOpenedServicePlan
-                        }
-                      >
-                        Save Changes
-                      </button>
-
-                      <button
-                        className="button button-secondary"
-                        onClick={
-                          duplicateOpenedServicePlan
-                        }
-                      >
-                        Duplicate
-                      </button>
-
-                      <button
-                        className="button button-danger"
-                        onClick={
-                          deleteOpenedServicePlan
-                        }
-                      >
-                        Delete
-                      </button>
-                    </div>
-
-                    <p className="settings-preview-copy">
-                      Loading this service into
-                      the Worship Console swaps
-                      the service song list but
-                      does not automatically
-                      send anything to the
-                      projector.
-                    </p>
-
-                    <div className="service-song-list">
-                      {openedServicePlanSongs.map(
-                        (song, index) => (
-                          <div
-                            key={`${openedServicePlan.id}-${song.id}-${index}`}
-                            className="service-song selected"
-                          >
-                            <span className="song-order">
-                              {index + 1}
-                            </span>
-
-                            <div className="service-song-copy">
-                              <strong>
-                                {song.title}
-                              </strong>
-
-                              <span>
-                                {song.author ||
-                                  'Unknown author'}
-                              </span>
-                            </div>
-                          </div>
-                        )
-                      )}
-
-                      {openedServicePlanSongs.length ===
-                        0 && (
-                        <div className="empty-state">
-                          This service plan is
-                          empty.
-                        </div>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <div className="empty-state">
-                    Select a service plan to
-                    rename it, reschedule it,
-                    duplicate it, delete it, or
-                    load it into the Worship
-                    Console.
-                  </div>
-                )}
-              </section>
-            </div>
           </>
         )}
 
@@ -5441,6 +5602,167 @@ Second line`}
                 onClick={createSong}
               >
                 Add Song
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSavedPlaylistModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <div className="modal-heading">
+              <div>
+                <p className="card-kicker">
+                  Manage Playlist
+                </p>
+
+                <h2>
+                  {savedPlaylistCreationMode ===
+                  'COPY'
+                    ? 'Duplicate Playlist'
+                    : 'Create New Playlist'}
+                </h2>
+              </div>
+
+              <button
+                className="modal-close"
+                onClick={closeSavedPlaylistModal}
+              >
+                ×
+              </button>
+            </div>
+
+            {savedPlaylistCreationMode ===
+              'COPY' && (
+              <label>
+                Playlist to Duplicate
+
+                <select
+                  value={savedPlaylistSourceId}
+                  onChange={
+                    handleSavedPlaylistSourceChange
+                  }
+                >
+                  <option value="">
+                    Choose a playlist
+                  </option>
+
+                  {playlists.map((playlist) => (
+                    <option
+                      key={playlist.id}
+                      value={playlist.id}
+                    >
+                      {playlist.reusable === false
+                        ? `${playlist.name} — ${formatShortDateLabel(playlist.serviceDate)}`
+                        : `Reusable: ${playlist.name}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+
+            {savedPlaylistCreationMode ===
+              'COPY' && savedPlaylistSource && (
+              <div className="service-plan-source-summary">
+                <div className="service-plan-source-header">
+                  <strong>
+                    Copying Playlist
+                  </strong>
+
+                  <span>
+                    {savedPlaylistSourceSongs.length}{' '}
+                    songs
+                  </span>
+                </div>
+
+                <div className="service-plan-source-name">
+                  {savedPlaylistSource.name}
+                </div>
+
+                <div className="service-plan-source-list">
+                  {savedPlaylistSourceSongs.map(
+                    (song, index) => (
+                      <div
+                        key={`saved-playlist-source-${song.id}-${index}`}
+                        className="service-plan-source-item"
+                      >
+                        <span className="song-order">
+                          {index + 1}
+                        </span>
+
+                        <div className="service-song-copy">
+                          <strong>
+                            {song.title}
+                          </strong>
+
+                          <span>
+                            {song.author ||
+                              'Unknown author'}
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  )}
+
+                  {savedPlaylistSourceSongs.length ===
+                    0 && (
+                    <div className="empty-state">
+                      This source playlist is empty.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <label>
+              New Playlist Name *
+
+              <input
+                name="name"
+                value={savedPlaylistForm.name}
+                onChange={handleSavedPlaylistFormChange}
+              />
+            </label>
+
+            <label>
+              Service Date *
+
+              <input
+                type="date"
+                name="serviceDate"
+                value={savedPlaylistForm.serviceDate}
+                onChange={handleSavedPlaylistFormChange}
+              />
+            </label>
+
+            <label>
+              Theme
+
+              <input
+                name="theme"
+                placeholder="Optional"
+                value={savedPlaylistForm.theme}
+                onChange={handleSavedPlaylistFormChange}
+              />
+            </label>
+
+            <div className="modal-buttons">
+              <button
+                className="button button-secondary"
+                onClick={closeSavedPlaylistModal}
+              >
+                Cancel
+              </button>
+
+              <button
+                className="button button-primary"
+                onClick={createSavedPlaylist}
+              >
+                {savedPlaylistCreationMode ===
+                'COPY'
+                  ? 'Duplicate Playlist'
+                  : 'Create Playlist'}
               </button>
             </div>
           </div>

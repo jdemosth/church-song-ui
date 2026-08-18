@@ -1676,6 +1676,32 @@ button:disabled {
   min-height: 100%;
 }
 
+.playlist-metadata-form {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.playlist-metadata-field {
+  display: grid;
+  gap: 6px;
+}
+
+.playlist-metadata-field span {
+  color: #5a6472;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.playlist-metadata-field input {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #dce2e9;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
 .service-plan-meta-grid {
   display: grid;
   grid-template-columns:
