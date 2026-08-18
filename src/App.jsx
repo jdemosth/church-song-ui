@@ -58,6 +58,20 @@ const BACKGROUND_OPTIONS = [
   },
 ]
 
+const LANGUAGE_LABELS = {
+  ENGLISH: 'English',
+  HAITIAN_CREOLE: 'Kreyòl',
+  SPANISH: 'Español',
+  UNKNOWN: 'Unknown',
+}
+
+const LANGUAGE_DISPLAY_ORDER = [
+  'ENGLISH',
+  'HAITIAN_CREOLE',
+  'SPANISH',
+  'UNKNOWN',
+]
+
 function sortServicePlans(servicePlans) {
   return [...servicePlans].sort((left, right) => {
     const leftDateTime = `${left.serviceDate || ''}T${left.serviceTime || '99:99'}`
@@ -243,6 +257,64 @@ function formatPlaylistDisplayName(playlist) {
   }
 
   return playlist.name || ''
+}
+
+function getLanguageLabel(language) {
+  return (
+    LANGUAGE_LABELS[language] ||
+    LANGUAGE_LABELS.UNKNOWN
+  )
+}
+
+function compareSongLanguages(
+  leftLanguage,
+  rightLanguage
+) {
+  return (
+    LANGUAGE_DISPLAY_ORDER.indexOf(
+      leftLanguage
+    ) -
+    LANGUAGE_DISPLAY_ORDER.indexOf(
+      rightLanguage
+    )
+  )
+}
+
+function getSongTypeBadge(songType) {
+  if (!songType) {
+    return null
+  }
+
+  return {
+    className:
+      songType === 'FAST'
+        ? 'type-label fast'
+        : 'type-label slow',
+    label: songType,
+  }
+}
+
+function getSongTypeLabel(songType) {
+  return songType || 'Unclassified'
+}
+
+function sortSongsByLanguageAndTitle(
+  left,
+  right
+) {
+  const languageOrder =
+    compareSongLanguages(
+      left.language,
+      right.language
+    )
+
+  if (languageOrder !== 0) {
+    return languageOrder
+  }
+
+  return (left.title || '').localeCompare(
+    right.title || ''
+  )
 }
 
 function getProjectorWindowState() {
@@ -800,11 +872,27 @@ function App() {
     useState([])
   const [servicePlans, setServicePlans] =
     useState([])
+  const [
+    familySongsByFamilyId,
+    setFamilySongsByFamilyId,
+  ] = useState({})
+  const [
+    familySongsLoadingByFamilyId,
+    setFamilySongsLoadingByFamilyId,
+  ] = useState({})
+  const [
+    familySongsErrorByFamilyId,
+    setFamilySongsErrorByFamilyId,
+  ] = useState({})
 
   const [selectedSong, setSelectedSong] =
     useState(null)
   const [currentSong, setCurrentSong] =
     useState(null)
+  const [
+    currentSongSourceId,
+    setCurrentSongSourceId,
+  ] = useState(null)
 
   const [
     selectedPlaylist,
@@ -1839,6 +1927,56 @@ function App() {
   const selectedSongUsageCount =
     selectedSongPlaylistCount +
     selectedSongServicePlanNames.length
+  const currentSongResolved = useMemo(() => {
+    if (!currentSong?.id) {
+      return currentSong
+    }
+
+    return (
+      songs.find(
+        (song) => song.id === currentSong.id
+      ) || currentSong
+    )
+  }, [currentSong, songs])
+  const currentSongSelectionId =
+    currentSongSourceId ??
+    currentSongResolved?.id ??
+    null
+  const currentSongFamilyMembers = useMemo(() => {
+    if (!currentSongResolved?.familyId) {
+      return []
+    }
+
+    const cachedFamilySongs =
+      familySongsByFamilyId[
+        currentSongResolved.familyId
+      ] || []
+    const fallbackFamilySongs = songs.filter(
+      (song) =>
+        song.familyId ===
+        currentSongResolved.familyId
+    )
+    const familySongs =
+      cachedFamilySongs.length > 0
+        ? cachedFamilySongs
+        : fallbackFamilySongs
+
+    return [...familySongs]
+      .map((familySong) => {
+        const matchingSong = songs.find(
+          (song) => song.id === familySong.id
+        )
+
+        return matchingSong || familySong
+      })
+      .sort(sortSongsByLanguageAndTitle)
+  }, [
+    currentSongResolved?.familyId,
+    familySongsByFamilyId,
+    songs,
+  ])
+  const showCurrentSongLanguageSelector =
+    currentSongFamilyMembers.length > 1
 
   useEffect(() => {
     setSavedPlaylistMetadataForm({
@@ -1880,6 +2018,99 @@ function App() {
         projectionMode
     }
   }, [projectionMode])
+
+  useEffect(() => {
+    const familyId =
+      currentSongResolved?.familyId
+
+    if (!familyId) {
+      return
+    }
+
+    if (
+      familySongsByFamilyId[familyId] ||
+      familySongsLoadingByFamilyId[familyId]
+    ) {
+      return
+    }
+
+    let cancelled = false
+
+    async function loadSongFamilyMembers() {
+      try {
+        setFamilySongsLoadingByFamilyId(
+          (current) => ({
+            ...current,
+            [familyId]: true,
+          })
+        )
+        setFamilySongsErrorByFamilyId(
+          (current) => ({
+            ...current,
+            [familyId]: '',
+          })
+        )
+
+        const response = await fetch(
+          `http://localhost:8080/song-families/${familyId}/songs`
+        )
+
+        if (!response.ok) {
+          throw new Error(
+            'Failed to load language versions'
+          )
+        }
+
+        const data = await response.json()
+
+        if (cancelled) {
+          return
+        }
+
+        setFamilySongsByFamilyId(
+          (current) => ({
+            ...current,
+            [familyId]: data,
+          })
+        )
+      } catch (err) {
+        if (cancelled) {
+          return
+        }
+
+        console.error(err)
+        setFamilySongsErrorByFamilyId(
+          (current) => ({
+            ...current,
+            [familyId]:
+              err.message ||
+              'Failed to load language versions',
+          })
+        )
+      } finally {
+        if (cancelled) {
+          return
+        }
+
+        setFamilySongsLoadingByFamilyId(
+          (current) => ({
+            ...current,
+            [familyId]: false,
+          })
+        )
+      }
+    }
+
+    loadSongFamilyMembers()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    currentSongResolved?.familyId,
+    familySongsByFamilyId,
+    familySongsLoadingByFamilyId,
+  ])
 
   useEffect(() => {
     if (isProjectorWindow) {
@@ -2278,8 +2509,13 @@ function App() {
         setProjectionSong(null)
       }
 
-      if (currentSong?.id === deletedSongId) {
+      if (
+        currentSong?.id === deletedSongId ||
+        currentSongSelectionId ===
+          deletedSongId
+      ) {
         setCurrentSong(null)
+        setCurrentSongSourceId(null)
       }
     } catch (err) {
       if (selectedSongUsageCount > 0) {
@@ -2842,6 +3078,7 @@ function App() {
     setLoadedServicePlanId(null)
     setSelectedSong(null)
     setCurrentSong(null)
+    setCurrentSongSourceId(null)
     setProjectionSong(null)
     setSectionIndex(0)
     setActiveView('operator')
@@ -3084,13 +3321,17 @@ function App() {
         )
       }
 
-      if (currentSong?.id === song.id) {
+      if (
+        currentSong?.id === song.id ||
+        currentSongSelectionId === song.id
+      ) {
         setSelectedSong((current) =>
           current?.id === song.id
             ? null
             : current
         )
         setCurrentSong(null)
+        setCurrentSongSourceId(null)
         setProjectionSong(null)
         setSectionIndex(0)
       }
@@ -3296,11 +3537,37 @@ function App() {
       return
     }
 
-    setSelectedSong(song)
-    setCurrentSong(song)
-    setProjectionSong(song)
+    const resolvedSong =
+      songs.find(
+        (candidate) =>
+          candidate.id === song.id
+      ) || song
+
+    setSelectedSong(resolvedSong)
+    setCurrentSong(resolvedSong)
+    setCurrentSongSourceId(resolvedSong.id)
+    setProjectionSong(resolvedSong)
     setSectionIndex(0)
     setProjectionMode('LIVE')
+  }
+
+  function switchCurrentSongLanguage(
+    song
+  ) {
+    if (!song || !currentSong) {
+      return
+    }
+
+    const resolvedSong =
+      songs.find(
+        (candidate) =>
+          candidate.id === song.id
+      ) || song
+
+    setSelectedSong(resolvedSong)
+    setCurrentSong(resolvedSong)
+    setProjectionSong(resolvedSong)
+    setSectionIndex(0)
   }
 
   function showLyrics() {
@@ -3778,16 +4045,23 @@ function App() {
                           </span>
                         </div>
 
-                        <span
-                          className={
-                            song.songType ===
-                            'FAST'
-                              ? 'type-label fast'
-                              : 'type-label slow'
-                          }
-                        >
-                          {song.songType}
-                        </span>
+                        {getSongTypeBadge(
+                          song.songType
+                        ) && (
+                          <span
+                            className={
+                              getSongTypeBadge(
+                                song.songType
+                              ).className
+                            }
+                          >
+                            {
+                              getSongTypeBadge(
+                                song.songType
+                              ).label
+                            }
+                          </span>
+                        )}
                       </button>
                     )
                   )}
@@ -3907,7 +4181,7 @@ function App() {
                         key={song.id}
                         className={[
                           'service-song',
-                          currentSong?.id ===
+                          currentSongSelectionId ===
                           song.id
                             ? 'selected'
                             : '',
@@ -4175,17 +4449,20 @@ function App() {
                       )}
                     </div>
 
-                    {currentSong && (
+                    {getSongTypeBadge(
+                      currentSong?.songType
+                    ) && (
                       <span
                         className={
-                          currentSong.songType ===
-                          'FAST'
-                            ? 'type-label fast'
-                            : 'type-label slow'
+                          getSongTypeBadge(
+                            currentSong.songType
+                          ).className
                         }
                       >
                         {
-                          currentSong.songType
+                          getSongTypeBadge(
+                            currentSong.songType
+                          ).label
                         }
                       </span>
                     )}
@@ -4193,52 +4470,88 @@ function App() {
 
                   {currentSong && (
                     <>
-                      <div className="section-control-area">
-                        <p className="small-title">
-                          Sections
-                        </p>
+                      <div className="current-song-controls">
+                        {showCurrentSongLanguageSelector && (
+                          <div className="song-language-control-area">
+                            <p className="small-title">
+                              Language
+                            </p>
 
-                        <div className="section-pills">
-                          {parseLyricsSections(
-                            currentSong.lyrics
-                          ).map(
-                            (
-                              section,
-                              index
-                            ) => (
-                              <button
-                                key={`${section.name}-${index}`}
-                                className={
-                                  sectionIndex ===
-                                  index
-                                    ? 'section-pill active'
-                                    : 'section-pill'
-                                }
-                                onClick={() => {
-                                  setProjectionSong(
-                                    currentSong
-                                  )
-
-                                  setSectionIndex(
-                                    index
-                                  )
-
-                                  setProjectionMode(
-                                    (
-                                      currentMode
-                                    ) =>
-                                      getNavigationProjectionMode(
-                                        currentMode
+                            <div className="song-language-pills">
+                              {currentSongFamilyMembers.map(
+                                (familySong) => (
+                                  <button
+                                    key={familySong.id}
+                                    type="button"
+                                    className={
+                                      familySong.id ===
+                                      currentSong.id
+                                        ? 'song-language-pill active'
+                                        : 'song-language-pill'
+                                    }
+                                    onClick={() =>
+                                      switchCurrentSongLanguage(
+                                        familySong
                                       )
-                                  )
-                                }}
-                              >
-                                {
-                                  section.name
-                                }
-                              </button>
-                            )
-                          )}
+                                    }
+                                  >
+                                    {getLanguageLabel(
+                                      familySong.language
+                                    )}
+                                  </button>
+                                )
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="section-control-area">
+                          <p className="small-title">
+                            Sections
+                          </p>
+
+                          <div className="section-pills">
+                            {parseLyricsSections(
+                              currentSong.lyrics
+                            ).map(
+                              (
+                                section,
+                                index
+                              ) => (
+                                <button
+                                  key={`${section.name}-${index}`}
+                                  className={
+                                    sectionIndex ===
+                                    index
+                                      ? 'section-pill active'
+                                      : 'section-pill'
+                                  }
+                                  onClick={() => {
+                                    setProjectionSong(
+                                      currentSong
+                                    )
+
+                                    setSectionIndex(
+                                      index
+                                    )
+
+                                    setProjectionMode(
+                                      (
+                                        currentMode
+                                      ) =>
+                                        getNavigationProjectionMode(
+                                          currentMode
+                                        )
+                                    )
+                                  }}
+                                >
+                                  {
+                                    section.name
+                                  }
+                                </button>
+                              )
+                            )}
+                          </div>
                         </div>
                       </div>
 
@@ -4608,16 +4921,23 @@ function App() {
                         </span>
                       </div>
 
-                      <span
-                        className={
-                          song.songType ===
-                          'FAST'
-                            ? 'type-label fast'
-                            : 'type-label slow'
-                        }
-                      >
-                        {song.songType}
-                      </span>
+                      {getSongTypeBadge(
+                        song.songType
+                      ) && (
+                        <span
+                          className={
+                            getSongTypeBadge(
+                              song.songType
+                            ).className
+                          }
+                        >
+                          {
+                            getSongTypeBadge(
+                              song.songType
+                            ).label
+                          }
+                        </span>
+                      )}
                     </button>
                   ))}
 
@@ -4642,17 +4962,20 @@ function App() {
                     </h3>
                   </div>
 
-                  {selectedSong && (
+                  {getSongTypeBadge(
+                    selectedSong?.songType
+                  ) && (
                     <span
                       className={
-                        selectedSong.songType ===
-                        'FAST'
-                          ? 'type-label fast'
-                          : 'type-label slow'
+                        getSongTypeBadge(
+                          selectedSong.songType
+                        ).className
                       }
                     >
                       {
-                        selectedSong.songType
+                        getSongTypeBadge(
+                          selectedSong.songType
+                        ).label
                       }
                     </span>
                   )}
@@ -4670,7 +4993,9 @@ function App() {
 
                       <p>
                         <strong>Type:</strong>{' '}
-                        {selectedSong.songType}
+                        {getSongTypeLabel(
+                          selectedSong.songType
+                        )}
                       </p>
 
                       <p>

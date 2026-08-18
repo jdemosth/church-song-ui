@@ -811,7 +811,7 @@ button:disabled {
 
 .current-song-card {
   padding-top: 14px;
-  padding-bottom: 14px;
+  padding-bottom: 18px;
 }
 
 .current-heading {
@@ -831,12 +831,47 @@ button:disabled {
   font-size: 13px;
 }
 
+.current-song-controls {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 18px 24px;
+  align-items: start;
+
+  margin-top: 10px;
+}
+
+.song-language-control-area {
+  min-width: 0;
+}
+
+.song-language-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.song-language-pill {
+  padding: 7px 10px;
+
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+
+  background: #ffffff;
+  color: #59667a;
+
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.song-language-pill.active {
+  background: #eef4ff;
+  color: var(--blue);
+  border-color: var(--blue);
+}
+
 .section-control-area {
-  margin-top: 12px;
-
-  padding-top: 12px;
-
-  border-top: 1px solid #eef1f5;
+  min-width: 0;
+  padding-bottom: 2px;
 }
 
 .small-title {
@@ -883,7 +918,7 @@ button:disabled {
 
   gap: 12px;
 
-  margin: 6px 4px 2px;
+  margin: 12px 4px 4px;
   min-width: 0;
 }
 
@@ -909,6 +944,13 @@ button:disabled {
   justify-content: flex-end;
   gap: 6px;
   min-width: 0;
+}
+
+@media (max-width: 1380px) {
+  .current-song-controls {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
 }
 
 .current-actions .button {
