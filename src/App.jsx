@@ -62,15 +62,215 @@ const LANGUAGE_LABELS = {
   ENGLISH: 'English',
   HAITIAN_CREOLE: 'Kreyòl',
   SPANISH: 'Español',
+  FRENCH: 'Français',
   UNKNOWN: 'Unknown',
 }
 
-const LANGUAGE_DISPLAY_ORDER = [
+const SUPPORTED_SONG_LANGUAGES = [
   'ENGLISH',
   'HAITIAN_CREOLE',
   'SPANISH',
+  'FRENCH',
+]
+
+const LANGUAGE_DISPLAY_ORDER = [
+  ...SUPPORTED_SONG_LANGUAGES,
   'UNKNOWN',
 ]
+
+const SONG_LANGUAGE_OPTIONS = [
+  {
+    value: 'ENGLISH',
+    label: 'English',
+  },
+  {
+    value: 'HAITIAN_CREOLE',
+    label: 'Kreyòl',
+  },
+  {
+    value: 'SPANISH',
+    label: 'Español',
+  },
+  {
+    value: 'FRENCH',
+    label: 'Français',
+  },
+]
+
+function normalizeLanguage(value) {
+  const normalized = String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[-\s]+/g, '_')
+
+  switch (normalized) {
+    case 'EN':
+    case 'ENGLISH':
+      return 'ENGLISH'
+
+    case 'CREOLE':
+    case 'KREYOL':
+    case 'KREYÒL':
+    case 'HAITIAN_CREOLE':
+    case 'HAITIANCREOLE':
+      return 'HAITIAN_CREOLE'
+
+    case 'ES':
+    case 'SPANISH':
+    case 'ESPANOL':
+    case 'ESPAÑOL':
+      return 'SPANISH'
+
+    case 'FR':
+    case 'FRENCH':
+    case 'FRANCAIS':
+    case 'FRANÇAIS':
+      return 'FRENCH'
+
+    default:
+      return normalized
+  }
+}
+
+const PLAYLIST_SERVICE_TYPE_OPTIONS = [
+  'Tuesday Evening',
+  'Thursday Evening',
+  'Sunday Morning',
+  'Prayer/Fasting Service',
+  'Youth Service',
+  'Fellowship Service',
+  'Other',
+]
+
+function createSavedPlaylistForm(
+  overrides = {}
+) {
+  return {
+    serviceType: 'Sunday Morning',
+    customServiceType: '',
+    serviceDate: getTodayDateValue(),
+    theme: '',
+    legacyName: '',
+    ...overrides,
+  }
+}
+
+function resolvePlaylistServiceType(
+  serviceType,
+  customServiceType = ''
+) {
+  const normalizedServiceType =
+    serviceType?.trim() || ''
+
+  if (!normalizedServiceType) {
+    return ''
+  }
+
+  if (normalizedServiceType !== 'Other') {
+    return normalizedServiceType
+  }
+
+  return customServiceType.trim()
+}
+
+function inferPlaylistServiceFields(
+  playlist
+) {
+  const metadataServiceType =
+    playlist?.serviceType?.trim() || ''
+
+  if (metadataServiceType) {
+    const isKnownOption =
+      PLAYLIST_SERVICE_TYPE_OPTIONS.includes(
+        metadataServiceType
+      )
+
+    return {
+      serviceType: isKnownOption
+        ? metadataServiceType
+        : 'Other',
+      customServiceType:
+        isKnownOption ? '' : metadataServiceType,
+      effectiveServiceType: isKnownOption
+        ? metadataServiceType
+        : metadataServiceType,
+    }
+  }
+
+  const playlistName =
+    playlist?.name?.trim() || ''
+  const legacyPrefixMatch =
+    playlistName.match(
+      /^(.*?)\s[-–—]\s[A-Za-z]{3}\s+\d{1,2},\s+\d{4}$/
+    )
+  const inferredPrefix =
+    legacyPrefixMatch?.[1]?.trim() || ''
+
+  if (!inferredPrefix) {
+    return {
+      serviceType: '',
+      customServiceType: '',
+      effectiveServiceType: '',
+    }
+  }
+
+  const isKnownOption =
+    PLAYLIST_SERVICE_TYPE_OPTIONS.includes(
+      inferredPrefix
+    )
+
+  return {
+    serviceType: isKnownOption
+      ? inferredPrefix
+      : 'Other',
+    customServiceType:
+      isKnownOption ? '' : inferredPrefix,
+    effectiveServiceType: inferredPrefix,
+  }
+}
+
+function createPlaylistFormFromPlaylist(
+  playlist
+) {
+  const inferredFields =
+    inferPlaylistServiceFields(playlist)
+
+  return createSavedPlaylistForm({
+    serviceType:
+      inferredFields.serviceType,
+    customServiceType:
+      inferredFields.customServiceType,
+    serviceDate: playlist?.serviceDate || '',
+    theme: playlist?.theme || '',
+    legacyName: playlist?.name || '',
+  })
+}
+
+function createBlankSongForm() {
+  return {
+    title: '',
+    author: '',
+    lyrics: '',
+    songType: 'SLOW',
+    familyId: null,
+    language: 'ENGLISH',
+  }
+}
+
+function createSongFormFromSong(song) {
+  if (!song) {
+    return createBlankSongForm()
+  }
+
+  return {
+    title: song.title || '',
+    author: song.author || '',
+    lyrics: song.lyrics || '',
+    songType: song.songType || 'SLOW',
+    familyId: song.familyId ?? null,
+    language: song.language || 'UNKNOWN',
+  }
+}
 
 function sortServicePlans(servicePlans) {
   return [...servicePlans].sort((left, right) => {
@@ -185,6 +385,42 @@ function buildTodayServiceName(
   return `${weekday} — ${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}/${year}`
 }
 
+function buildStructuredPlaylistName(
+  serviceType,
+  serviceDate,
+  fallbackName = ''
+) {
+  const effectiveServiceType =
+    serviceType?.trim() || ''
+
+  if (!effectiveServiceType || !serviceDate) {
+    return fallbackName
+  }
+
+  const [year, month, day] =
+    serviceDate.split('-').map(Number)
+
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day)
+  ) {
+    return fallbackName || serviceDate
+  }
+
+  const date = new Date(
+    year,
+    month - 1,
+    day
+  )
+
+  return `${effectiveServiceType} – ${date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })}`
+}
+
 function formatFullDateLabel(serviceDate) {
   if (!serviceDate) {
     return 'No date'
@@ -249,21 +485,57 @@ function formatPlaylistDisplayName(playlist) {
     return ''
   }
 
-  if (
-    playlist.reusable === false &&
-    playlist.serviceDate
-  ) {
-    return `${playlist.name} — ${formatShortDateLabel(playlist.serviceDate)}`
+  const inferredFields =
+    inferPlaylistServiceFields(playlist)
+  const generatedName =
+    buildStructuredPlaylistName(
+      inferredFields.effectiveServiceType,
+      playlist.serviceDate,
+      playlist.name || ''
+    )
+
+  return generatedName || playlist.name || ''
+}
+
+function formatConsoleServiceLabel(
+  activePlaylist,
+  loadedServicePlan
+) {
+  const serviceName =
+    loadedServicePlan?.serviceName?.trim() ||
+    inferPlaylistServiceFields(activePlaylist)
+      .effectiveServiceType ||
+    ''
+
+  if (!serviceName) {
+    return 'WORSHIP SERVICE'
   }
 
-  return playlist.name || ''
+  const normalizedServiceName =
+    serviceName.replace(/\s+/g, ' ').trim()
+  const withSuffix = /service$/i.test(
+    normalizedServiceName
+  )
+    ? normalizedServiceName
+    : `${normalizedServiceName} Service`
+
+  return withSuffix.toUpperCase()
 }
 
 function getLanguageLabel(language) {
+  const canonicalLanguage =
+    normalizeLanguage(language)
+
   return (
-    LANGUAGE_LABELS[language] ||
+    LANGUAGE_LABELS[canonicalLanguage] ||
     LANGUAGE_LABELS.UNKNOWN
   )
+}
+
+function getLanguageUnavailableTitle(
+  language
+) {
+  return `${getLanguageLabel(language)} translation not available`
 }
 
 function compareSongLanguages(
@@ -278,6 +550,81 @@ function compareSongLanguages(
       rightLanguage
     )
   )
+}
+
+function createEmptyLanguageVersions() {
+  return Object.fromEntries(
+    SUPPORTED_SONG_LANGUAGES.map(
+      (language) => [language, null]
+    )
+  )
+}
+
+function buildLanguageVersionsFromSongs(
+  familySongs = []
+) {
+  const versions =
+    createEmptyLanguageVersions()
+
+  for (const familySong of familySongs) {
+    const canonicalLanguage =
+      normalizeLanguage(
+        familySong?.language
+      )
+
+    if (
+      !familySong ||
+      !SUPPORTED_SONG_LANGUAGES.includes(
+        canonicalLanguage
+      )
+    ) {
+      continue
+    }
+
+    versions[canonicalLanguage] =
+      familySong
+  }
+
+  return versions
+}
+
+function findMatchingSectionIndex(
+  currentSong,
+  nextSong,
+  currentIndex
+) {
+  const currentSections =
+    parseLyricsSections(
+      currentSong?.lyrics || ''
+    )
+  const nextSections = parseLyricsSections(
+    nextSong?.lyrics || ''
+  )
+
+  if (nextSections.length === 0) {
+    return 0
+  }
+
+  const currentSection =
+    currentSections[currentIndex] ||
+    currentSections[0]
+
+  if (!currentSection?.name) {
+    return 0
+  }
+
+  const matchingIndex =
+    nextSections.findIndex(
+      (section) =>
+        section.name?.trim().toLowerCase() ===
+        currentSection.name
+          ?.trim()
+          .toLowerCase()
+    )
+
+  return matchingIndex >= 0
+    ? matchingIndex
+    : 0
 }
 
 function getSongTypeBadge(songType) {
@@ -873,17 +1220,21 @@ function App() {
   const [servicePlans, setServicePlans] =
     useState([])
   const [
-    familySongsByFamilyId,
-    setFamilySongsByFamilyId,
+    familyVersionsByFamilyId,
+    setFamilyVersionsByFamilyId,
   ] = useState({})
   const [
-    familySongsLoadingByFamilyId,
-    setFamilySongsLoadingByFamilyId,
+    familyVersionsLoadingByFamilyId,
+    setFamilyVersionsLoadingByFamilyId,
   ] = useState({})
   const [
-    familySongsErrorByFamilyId,
-    setFamilySongsErrorByFamilyId,
+    familyVersionsErrorByFamilyId,
+    setFamilyVersionsErrorByFamilyId,
   ] = useState({})
+  const [
+    currentSongLanguageNotice,
+    setCurrentSongLanguageNotice,
+  ] = useState('')
 
   const [selectedSong, setSelectedSong] =
     useState(null)
@@ -941,6 +1292,10 @@ function App() {
     showEditSongModal,
     setShowEditSongModal,
   ] = useState(false)
+  const [
+    editingSongId,
+    setEditingSongId,
+  ] = useState(null)
   const [
     showDeleteBlockedModal,
     setShowDeleteBlockedModal,
@@ -1022,19 +1377,13 @@ function App() {
     }
   })
 
-  const [newSong, setNewSong] = useState({
-    title: '',
-    author: '',
-    lyrics: '',
-    songType: 'SLOW',
-  })
+  const [newSong, setNewSong] = useState(
+    createBlankSongForm
+  )
 
-  const [editSong, setEditSong] = useState({
-    title: '',
-    author: '',
-    lyrics: '',
-    songType: 'SLOW',
-  })
+  const [editSong, setEditSong] = useState(
+    createBlankSongForm
+  )
   const [
     backgroundType,
     setBackgroundType,
@@ -1116,19 +1465,18 @@ function App() {
   const [
     savedPlaylistForm,
     setSavedPlaylistForm,
-  ] = useState({
-    name: '',
-    serviceDate: getTodayDateValue(),
-    theme: '',
-  })
+  ] = useState(() =>
+    createSavedPlaylistForm()
+  )
   const [
     savedPlaylistMetadataForm,
     setSavedPlaylistMetadataForm,
-  ] = useState({
-    name: '',
-    serviceDate: '',
-    theme: '',
-  })
+  ] = useState(() =>
+    createSavedPlaylistForm({
+      serviceType: '',
+      serviceDate: '',
+    })
+  )
   const [
     useForTodaySourcePlaylistId,
     setUseForTodaySourcePlaylistId,
@@ -1728,6 +2076,7 @@ function App() {
     return managedPlaylists.filter((playlist) => {
       const searchableValues = [
         playlist.name || '',
+        playlist.serviceType || '',
         playlist.theme || '',
         playlist.serviceDate || '',
         formatShortDateLabel(
@@ -1795,6 +2144,23 @@ function App() {
     ) || null
   const managedPlaylistIsSaved =
     managedPlaylist?.reusable === false
+  const savedPlaylistPreviewName =
+    buildStructuredPlaylistName(
+      resolvePlaylistServiceType(
+        savedPlaylistForm.serviceType,
+        savedPlaylistForm.customServiceType
+      ),
+      savedPlaylistForm.serviceDate
+    )
+  const managedPlaylistPreviewName =
+    buildStructuredPlaylistName(
+      resolvePlaylistServiceType(
+        savedPlaylistMetadataForm.serviceType,
+        savedPlaylistMetadataForm.customServiceType
+      ),
+      savedPlaylistMetadataForm.serviceDate,
+      savedPlaylistMetadataForm.legacyName
+    )
   const openedServicePlan =
     servicePlans.find(
       (servicePlan) =>
@@ -1860,6 +2226,11 @@ function App() {
     usingLoadedServicePlan
       ? loadedServicePlan.serviceName
       : selectedPlaylist?.name
+  const consoleServiceHeaderLabel =
+    formatConsoleServiceLabel(
+      selectedPlaylist,
+      loadedServicePlan
+    )
   const consoleCollectionTypeLabel =
     usingLoadedServicePlan
       ? 'Loaded Service Plan'
@@ -1942,55 +2313,126 @@ function App() {
     currentSongSourceId ??
     currentSongResolved?.id ??
     null
-  const currentSongFamilyMembers = useMemo(() => {
-    if (!currentSongResolved?.familyId) {
-      return []
-    }
+  const currentSongLanguageVersions =
+    useMemo(() => {
+      if (!currentSongResolved) {
+        return createEmptyLanguageVersions()
+      }
 
-    const cachedFamilySongs =
-      familySongsByFamilyId[
-        currentSongResolved.familyId
-      ] || []
-    const fallbackFamilySongs = songs.filter(
-      (song) =>
-        song.familyId ===
-        currentSongResolved.familyId
-    )
-    const familySongs =
-      cachedFamilySongs.length > 0
-        ? cachedFamilySongs
-        : fallbackFamilySongs
-
-    return [...familySongs]
-      .map((familySong) => {
-        const matchingSong = songs.find(
-          (song) => song.id === familySong.id
+      const currentSongLanguage =
+        normalizeLanguage(
+          currentSongResolved.language
         )
 
-        return matchingSong || familySong
-      })
-      .sort(sortSongsByLanguageAndTitle)
-  }, [
-    currentSongResolved?.familyId,
-    familySongsByFamilyId,
-    songs,
-  ])
+      if (currentSongResolved.familyId) {
+        const cachedVersions =
+          familyVersionsByFamilyId[
+            currentSongResolved.familyId
+          ]?.versions
+
+        if (cachedVersions) {
+          const versions =
+            createEmptyLanguageVersions()
+
+          Object.entries(cachedVersions).forEach(
+            ([language, familySong]) => {
+              const canonicalLanguage =
+                normalizeLanguage(
+                  language
+                )
+
+              if (
+                !familySong ||
+                !SUPPORTED_SONG_LANGUAGES.includes(
+                  canonicalLanguage
+                )
+              ) {
+                return
+              }
+
+              const matchingSong = songs.find(
+                (song) =>
+                  song.id === familySong.id
+              )
+
+              versions[canonicalLanguage] =
+                matchingSong || familySong
+            }
+          )
+
+          if (
+            SUPPORTED_SONG_LANGUAGES.includes(
+              currentSongLanguage
+            ) &&
+            !versions[currentSongLanguage]
+          ) {
+            versions[currentSongLanguage] =
+              currentSongResolved
+          }
+
+          return versions
+        }
+
+        const versions =
+          buildLanguageVersionsFromSongs(
+          songs.filter(
+            (song) =>
+              song.familyId ===
+              currentSongResolved.familyId
+          )
+        )
+
+        if (
+          SUPPORTED_SONG_LANGUAGES.includes(
+            currentSongLanguage
+          ) &&
+          !versions[currentSongLanguage]
+        ) {
+          versions[currentSongLanguage] =
+            currentSongResolved
+        }
+
+        return versions
+      }
+
+      const versions =
+        createEmptyLanguageVersions()
+
+      if (
+        SUPPORTED_SONG_LANGUAGES.includes(
+          currentSongLanguage
+        )
+      ) {
+        versions[currentSongLanguage] =
+          currentSongResolved
+      }
+
+      return versions
+    }, [
+      currentSongResolved,
+      familyVersionsByFamilyId,
+      songs,
+    ])
   const showCurrentSongLanguageSelector =
-    currentSongFamilyMembers.length > 1
+    Boolean(currentSongResolved)
 
   useEffect(() => {
-    setSavedPlaylistMetadataForm({
-      name: managedPlaylist?.name || '',
-      serviceDate:
-        managedPlaylist?.serviceDate || '',
-      theme: managedPlaylist?.theme || '',
-    })
+    setSavedPlaylistMetadataForm(
+      createPlaylistFormFromPlaylist(
+        managedPlaylist
+      )
+    )
   }, [
     managedPlaylist?.id,
     managedPlaylist?.name,
+    managedPlaylist?.serviceType,
     managedPlaylist?.serviceDate,
     managedPlaylist?.theme,
   ])
+
+  useEffect(() => {
+    setCurrentSongLanguageNotice('')
+  }, [currentSongResolved?.id])
 
   useEffect(() => {
     setServicePlanForm({
@@ -2028,8 +2470,8 @@ function App() {
     }
 
     if (
-      familySongsByFamilyId[familyId] ||
-      familySongsLoadingByFamilyId[familyId]
+      familyVersionsByFamilyId[familyId] ||
+      familyVersionsLoadingByFamilyId[familyId]
     ) {
       return
     }
@@ -2038,13 +2480,13 @@ function App() {
 
     async function loadSongFamilyMembers() {
       try {
-        setFamilySongsLoadingByFamilyId(
+        setFamilyVersionsLoadingByFamilyId(
           (current) => ({
             ...current,
             [familyId]: true,
           })
         )
-        setFamilySongsErrorByFamilyId(
+        setFamilyVersionsErrorByFamilyId(
           (current) => ({
             ...current,
             [familyId]: '',
@@ -2052,7 +2494,7 @@ function App() {
         )
 
         const response = await fetch(
-          `http://localhost:8080/song-families/${familyId}/songs`
+          `http://localhost:8080/song-families/${familyId}/versions`
         )
 
         if (!response.ok) {
@@ -2067,7 +2509,7 @@ function App() {
           return
         }
 
-        setFamilySongsByFamilyId(
+        setFamilyVersionsByFamilyId(
           (current) => ({
             ...current,
             [familyId]: data,
@@ -2079,7 +2521,7 @@ function App() {
         }
 
         console.error(err)
-        setFamilySongsErrorByFamilyId(
+        setFamilyVersionsErrorByFamilyId(
           (current) => ({
             ...current,
             [familyId]:
@@ -2092,7 +2534,7 @@ function App() {
           return
         }
 
-        setFamilySongsLoadingByFamilyId(
+        setFamilyVersionsLoadingByFamilyId(
           (current) => ({
             ...current,
             [familyId]: false,
@@ -2108,8 +2550,8 @@ function App() {
     }
   }, [
     currentSongResolved?.familyId,
-    familySongsByFamilyId,
-    familySongsLoadingByFamilyId,
+    familyVersionsByFamilyId,
+    familyVersionsLoadingByFamilyId,
   ])
 
   useEffect(() => {
@@ -2168,6 +2610,17 @@ function App() {
     }))
   }
 
+  function closeNewSongModal() {
+    setShowNewSongModal(false)
+    setNewSong(createBlankSongForm())
+  }
+
+  function closeEditSongModal() {
+    setShowEditSongModal(false)
+    setEditingSongId(null)
+    setEditSong(createBlankSongForm())
+  }
+
   async function createSong() {
     try {
       setError('')
@@ -2202,15 +2655,7 @@ function App() {
 
       setSelectedSong(createdSong)
       setSectionIndex(0)
-
-      setNewSong({
-        title: '',
-        author: '',
-        lyrics: '',
-        songType: 'SLOW',
-      })
-
-      setShowNewSongModal(false)
+      closeNewSongModal()
     } catch (err) {
       setError(err.message)
     }
@@ -2219,24 +2664,26 @@ function App() {
   function openEditSongModal(
     song = selectedSong
   ) {
-    if (!song) {
+    const resolvedSong =
+      songs.find(
+        (candidate) =>
+          candidate.id === song?.id
+      ) || song
+
+    if (!resolvedSong) {
       return
     }
 
-    setSelectedSong(song)
-    setEditSong({
-      title: song.title || '',
-      author: song.author || '',
-      lyrics: song.lyrics || '',
-      songType:
-        song.songType || 'SLOW',
-    })
-
+    setSelectedSong(resolvedSong)
+    setEditingSongId(resolvedSong.id)
+    setEditSong(
+      createSongFormFromSong(resolvedSong)
+    )
     setShowEditSongModal(true)
   }
 
   async function updateSong() {
-    if (!selectedSong) {
+    if (!editingSongId) {
       return
     }
 
@@ -2244,7 +2691,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/songs/${selectedSong.id}`,
+        `http://localhost:8080/songs/${editingSongId}`,
         {
           method: 'PUT',
 
@@ -2258,8 +2705,12 @@ function App() {
       )
 
       if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
         throw new Error(
-          'Failed to update song'
+          message ||
+            'Failed to update song'
         )
       }
 
@@ -2345,7 +2796,7 @@ function App() {
         setProjectionSong(updatedSong)
       }
 
-      setShowEditSongModal(false)
+      closeEditSongModal()
     } catch (err) {
       setError(err.message)
     }
@@ -2370,8 +2821,12 @@ function App() {
       )
 
       if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
         throw new Error(
-          'Failed to add song to playlist'
+          message ||
+            'Failed to add song to playlist'
         )
       }
 
@@ -2502,6 +2957,9 @@ function App() {
       )
 
       setSongs(nextSongs)
+      if (editingSongId === deletedSongId) {
+        closeEditSongModal()
+      }
       setSelectedSong(nextSongs[0] || null)
       setSectionIndex(0)
 
@@ -2854,11 +3312,9 @@ function App() {
     setSuccessMessage('')
     setSavedPlaylistCreationMode('NEW')
     setSavedPlaylistSourceId('')
-    setSavedPlaylistForm({
-      name: '',
-      serviceDate: getTodayDateValue(),
-      theme: '',
-    })
+    setSavedPlaylistForm(
+      createSavedPlaylistForm()
+    )
     setShowSavedPlaylistModal(true)
   }
 
@@ -2874,11 +3330,11 @@ function App() {
     setSavedPlaylistSourceId(
       sourcePlaylist?.id ? String(sourcePlaylist.id) : ''
     )
-    setSavedPlaylistForm({
-      name: '',
-      serviceDate: getTodayDateValue(),
-      theme: sourcePlaylist?.theme || '',
-    })
+    setSavedPlaylistForm(
+      createSavedPlaylistForm({
+        theme: sourcePlaylist?.theme || '',
+      })
+    )
     setShowSavedPlaylistModal(true)
   }
 
@@ -2921,15 +3377,35 @@ function App() {
   }
 
   async function createSavedPlaylist() {
-    const name = savedPlaylistForm.name.trim()
+    const serviceType =
+      savedPlaylistForm.serviceType.trim()
+    const customServiceType =
+      savedPlaylistForm.customServiceType.trim()
+    const effectiveServiceType =
+      resolvePlaylistServiceType(
+        serviceType,
+        customServiceType
+      )
     const serviceDate =
       savedPlaylistForm.serviceDate.trim()
     const theme = savedPlaylistForm.theme.trim()
     const copyingPlaylist =
       savedPlaylistCreationMode === 'COPY'
 
-    if (!name || !serviceDate) {
-      setError('Saved playlist name and date are required')
+    if (!serviceType || !serviceDate) {
+      setError(
+        'Service type and date are required'
+      )
+      return
+    }
+
+    if (
+      serviceType === 'Other' &&
+      !customServiceType
+    ) {
+      setError(
+        'Custom service name is required'
+      )
       return
     }
 
@@ -2951,7 +3427,8 @@ function App() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          name,
+          serviceType,
+          customServiceType,
           serviceDate,
           theme,
         }),
@@ -2988,7 +3465,7 @@ function App() {
       setSuccessMessage(
         copyingPlaylist
           ? `Created saved playlist "${createdPlaylist.name}" from "${savedPlaylistSource.name}".`
-          : `Created empty saved playlist "${createdPlaylist.name}".`
+          : `Created playlist "${buildStructuredPlaylistName(effectiveServiceType, serviceDate, createdPlaylist.name)}".`
       )
     } catch (err) {
       setError(err.message)
@@ -2996,24 +3473,41 @@ function App() {
     }
   }
 
-  async function saveManagedPlaylistMetadata() {
+  async function persistManagedPlaylistMetadata() {
     if (!managedPlaylist) {
-      return
+      return null
     }
 
-    const name = savedPlaylistMetadataForm.name.trim()
+    const serviceType =
+      savedPlaylistMetadataForm.serviceType.trim()
+    const customServiceType =
+      savedPlaylistMetadataForm.customServiceType.trim()
     const serviceDate =
       savedPlaylistMetadataForm.serviceDate.trim()
     const theme = savedPlaylistMetadataForm.theme.trim()
 
-    if (!name) {
-      setError('Playlist name is required')
-      return
+    if (
+      managedPlaylistIsSaved &&
+      !serviceType &&
+      !savedPlaylistMetadataForm.legacyName.trim()
+    ) {
+      setError('Service type is required')
+      return null
     }
 
     if (managedPlaylistIsSaved && !serviceDate) {
       setError('Service date is required')
-      return
+      return null
+    }
+
+    if (
+      serviceType === 'Other' &&
+      !customServiceType
+    ) {
+      setError(
+        'Custom service name is required'
+      )
+      return null
     }
 
     try {
@@ -3027,7 +3521,16 @@ function App() {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            name,
+            serviceType,
+            customServiceType,
+            name:
+              managedPlaylistIsSaved &&
+              !resolvePlaylistServiceType(
+                serviceType,
+                customServiceType
+              )
+                ? savedPlaylistMetadataForm.legacyName.trim()
+                : undefined,
             serviceDate,
             theme,
           }),
@@ -3057,24 +3560,54 @@ function App() {
       }
 
       setManagedPlaylistId(updatedPlaylist.id)
-      setSuccessMessage(
-        `Updated playlist "${updatedPlaylist.name}".`
-      )
+      return updatedPlaylist
     } catch (err) {
       setError(err.message)
       setSuccessMessage('')
+      return null
     }
   }
 
-  function makePlaylistActiveAndReturnToConsole(
+  async function saveManagedPlaylistMetadata() {
+    const updatedPlaylist =
+      await persistManagedPlaylistMetadata()
+
+    if (!updatedPlaylist) {
+      return
+    }
+
+    setSuccessMessage(
+      `Updated playlist "${updatedPlaylist.name}".`
+    )
+  }
+
+  async function makePlaylistActiveAndReturnToConsole(
     playlist = managedPlaylist
   ) {
     if (!playlist) {
       return
     }
 
-    setManagedPlaylistId(playlist.id)
-    setSelectedPlaylist(playlist)
+    let playlistToActivate = playlist
+
+    if (
+      managedPlaylistIsSaved &&
+      playlist.id === managedPlaylist?.id
+    ) {
+      const updatedPlaylist =
+        await persistManagedPlaylistMetadata()
+
+      if (!updatedPlaylist) {
+        return
+      }
+
+      playlistToActivate = updatedPlaylist
+    }
+
+    setManagedPlaylistId(
+      playlistToActivate.id
+    )
+    setSelectedPlaylist(playlistToActivate)
     setLoadedServicePlanId(null)
     setSelectedSong(null)
     setCurrentSong(null)
@@ -3083,7 +3616,7 @@ function App() {
     setSectionIndex(0)
     setActiveView('operator')
     setSuccessMessage(
-      `Made playlist "${playlist.name}" active in the Worship Console.`
+      `Made playlist "${playlistToActivate.name}" active in the Worship Console.`
     )
   }
 
@@ -3526,6 +4059,7 @@ function App() {
       return
     }
 
+    setCurrentSongLanguageNotice('')
     setCurrentSong(song)
     setProjectionSong(song)
     setSectionIndex(0)
@@ -3543,6 +4077,7 @@ function App() {
           candidate.id === song.id
       ) || song
 
+    setCurrentSongLanguageNotice('')
     setSelectedSong(resolvedSong)
     setCurrentSong(resolvedSong)
     setCurrentSongSourceId(resolvedSong.id)
@@ -3552,22 +4087,43 @@ function App() {
   }
 
   function switchCurrentSongLanguage(
-    song
+    language
   ) {
-    if (!song || !currentSong) {
+    if (!currentSongResolved) {
+      return
+    }
+
+    const nextSong =
+      currentSongLanguageVersions[language]
+
+    if (!nextSong) {
+      setCurrentSongLanguageNotice(
+        `No ${getLanguageLabel(language)} version available yet.`
+      )
       return
     }
 
     const resolvedSong =
       songs.find(
         (candidate) =>
-          candidate.id === song.id
-      ) || song
+          candidate.id === nextSong.id
+      ) || nextSong
 
+    const nextSectionIndex =
+      findMatchingSectionIndex(
+        currentSongResolved,
+        resolvedSong,
+        sectionIndex
+      )
+
+    setCurrentSongLanguageNotice('')
     setSelectedSong(resolvedSong)
     setCurrentSong(resolvedSong)
+    setCurrentSongSourceId(
+      resolvedSong.id
+    )
     setProjectionSong(resolvedSong)
-    setSectionIndex(0)
+    setSectionIndex(nextSectionIndex)
   }
 
   function showLyrics() {
@@ -3922,7 +4478,7 @@ function App() {
             <header className="service-header">
               <div>
                 <p className="page-kicker">
-                  Sunday Morning Service
+                  {consoleServiceHeaderLabel}
                 </p>
 
                 <h2>
@@ -3945,11 +4501,15 @@ function App() {
 
                 <button
                   className="button button-primary"
-                  onClick={() =>
+                  onClick={() => {
+                    setError('')
+                    setNewSong(
+                      createBlankSongForm()
+                    )
                     setShowNewSongModal(
                       true
                     )
-                  }
+                  }}
                 >
                   + New Song
                 </button>
@@ -4478,30 +5038,80 @@ function App() {
                             </p>
 
                             <div className="song-language-pills">
-                              {currentSongFamilyMembers.map(
-                                (familySong) => (
-                                  <button
-                                    key={familySong.id}
-                                    type="button"
-                                    className={
-                                      familySong.id ===
-                                      currentSong.id
-                                        ? 'song-language-pill active'
-                                        : 'song-language-pill'
-                                    }
-                                    onClick={() =>
-                                      switchCurrentSongLanguage(
-                                        familySong
-                                      )
-                                    }
-                                  >
-                                    {getLanguageLabel(
-                                      familySong.language
-                                    )}
-                                  </button>
-                                )
+                              {SUPPORTED_SONG_LANGUAGES.map(
+                                (language) => {
+                                  const familySong =
+                                    currentSongLanguageVersions[
+                                      language
+                                    ]
+                                  const activeLanguage =
+                                    normalizeLanguage(
+                                      currentSongResolved?.language
+                                    )
+                                  const isActive =
+                                    activeLanguage ===
+                                    language
+                                  const isAvailable =
+                                    Boolean(familySong)
+
+                                  return (
+                                    <button
+                                      key={language}
+                                      type="button"
+                                      className={[
+                                        'song-language-pill',
+                                        isActive
+                                          ? 'active'
+                                          : '',
+                                        !isAvailable
+                                          ? 'unavailable'
+                                          : '',
+                                      ]
+                                        .filter(Boolean)
+                                        .join(' ')}
+                                      disabled={
+                                        !isAvailable
+                                      }
+                                      title={
+                                        isAvailable
+                                          ? getLanguageLabel(
+                                              language
+                                            )
+                                          : getLanguageUnavailableTitle(
+                                              language
+                                            )
+                                      }
+                                      aria-pressed={
+                                        isActive
+                                      }
+                                      onClick={() => {
+                                        if (
+                                          !isAvailable
+                                        ) {
+                                          return
+                                        }
+
+                                        switchCurrentSongLanguage(
+                                          language
+                                        )
+                                      }}
+                                    >
+                                      {getLanguageLabel(
+                                        language
+                                      )}
+                                    </button>
+                                  )
+                                }
                               )}
                             </div>
+
+                            {currentSongLanguageNotice && (
+                              <p className="language-availability-note">
+                                {
+                                  currentSongLanguageNotice
+                                }
+                              </p>
+                            )}
                           </div>
                         )}
 
@@ -4629,73 +5239,75 @@ function App() {
                   </span>
 
                   <div className="background-option-list">
-                    {BACKGROUND_OPTIONS.map(
-                      (option) => (
+                    <div className="background-options">
+                      {BACKGROUND_OPTIONS.map(
+                        (option) => (
+                          <button
+                            key={option.id}
+                            type="button"
+                            className={[
+                              'background-option',
+                              backgroundVariant ===
+                              option.id
+                                ? 'active'
+                                : '',
+                            ]
+                              .filter(Boolean)
+                              .join(' ')}
+                            onClick={() =>
+                              selectPresetBackground(
+                                option.id
+                              )
+                            }
+                          >
+                            <span
+                              className={
+                                option.swatchClassName
+                              }
+                            />
+
+                            <span className="background-option-name">
+                              {option.name}
+                            </span>
+                          </button>
+                        )
+                      )}
+
+                      {customBackgroundId && (
                         <button
-                          key={option.id}
                           type="button"
                           className={[
                             'background-option',
-                            backgroundVariant ===
-                            option.id
+                            backgroundType ===
+                            'custom'
                               ? 'active'
                               : '',
                           ]
                             .filter(Boolean)
                             .join(' ')}
                           onClick={() =>
-                            selectPresetBackground(
-                              option.id
+                            setBackgroundType(
+                              'custom'
                             )
                           }
                         >
-                          <span
-                            className={
-                              option.swatchClassName
-                            }
-                          />
+                          <span className="background-swatch background-swatch-custom">
+                            {customBackgroundUrl && (
+                              <span
+                                className="background-swatch-image"
+                                style={{
+                                  backgroundImage: `url("${customBackgroundUrl}")`,
+                                }}
+                              />
+                            )}
+                          </span>
 
                           <span className="background-option-name">
-                            {option.name}
+                            Custom
                           </span>
                         </button>
-                      )
-                    )}
-
-                    {customBackgroundId && (
-                      <button
-                        type="button"
-                        className={[
-                          'background-option',
-                          backgroundType ===
-                          'custom'
-                            ? 'active'
-                            : '',
-                        ]
-                          .filter(Boolean)
-                          .join(' ')}
-                        onClick={() =>
-                          setBackgroundType(
-                            'custom'
-                          )
-                        }
-                      >
-                        <span className="background-swatch background-swatch-custom">
-                          {customBackgroundUrl && (
-                            <span
-                              className="background-swatch-image"
-                              style={{
-                                backgroundImage: `url("${customBackgroundUrl}")`,
-                              }}
-                            />
-                          )}
-                        </span>
-
-                        <span className="background-option-name">
-                          Custom
-                        </span>
-                      </button>
-                    )}
+                      )}
+                    </div>
 
                     <button
                       type="button"
@@ -4830,9 +5442,13 @@ function App() {
 
                 <button
                   className="button button-primary"
-                  onClick={() =>
+                  onClick={() => {
+                    setError('')
+                    setNewSong(
+                      createBlankSongForm()
+                    )
                     setShowNewSongModal(true)
-                  }
+                  }}
                 >
                   + New Song
                 </button>
@@ -5024,9 +5640,10 @@ function App() {
                     <div className="detail-actions">
                       <button
                         className="button button-secondary"
-                        onClick={
-                          openEditSongModal
+                        onClick={() =>
+                          openEditSongModal()
                         }
+                        disabled={!selectedSong}
                       >
                         Edit Song
                       </button>
@@ -5042,10 +5659,28 @@ function App() {
                     </div>
                   </>
                 ) : (
-                  <div className="empty-state">
-                    Choose a song to edit or
-                    delete it.
-                  </div>
+                  <>
+                    <div className="empty-state">
+                      Choose a song to edit or
+                      delete it.
+                    </div>
+
+                    <div className="detail-actions">
+                      <button
+                        className="button button-secondary"
+                        disabled
+                      >
+                        Edit Song
+                      </button>
+
+                      <button
+                        className="button button-danger"
+                        disabled
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </>
                 )}
                 </div>
               </section>
@@ -5165,10 +5800,9 @@ function App() {
                     >
                       <div className="playlist-management-copy">
                         <strong>
-                          {playlist.reusable === false &&
-                          playlist.serviceDate
-                            ? `${playlist.name} — ${formatShortDateLabel(playlist.serviceDate)}`
-                            : playlist.name}
+                          {formatPlaylistDisplayName(
+                            playlist
+                          )}
                         </strong>
 
                         <span>
@@ -5206,7 +5840,9 @@ function App() {
                     </p>
 
                     <h3>
-                      {managedPlaylist?.name ||
+                      {formatPlaylistDisplayName(
+                        managedPlaylist
+                      ) ||
                         'Select a Playlist'}
                     </h3>
                   </div>
@@ -5218,17 +5854,37 @@ function App() {
                     <div className="playlist-detail-top">
                       <div className="playlist-meta-row">
                         <label className="playlist-metadata-field">
-                          <span>Name</span>
-                          <input
-                            type="text"
-                            name="name"
+                          <span>Service Type</span>
+                          <select
+                            name="serviceType"
                             value={
-                              savedPlaylistMetadataForm.name
+                              savedPlaylistMetadataForm.serviceType
                             }
                             onChange={
                               handleSavedPlaylistMetadataChange
                             }
-                          />
+                            disabled={
+                              managedPlaylist?.reusable !==
+                              false
+                            }
+                          >
+                            <option value="">
+                              {managedPlaylist?.serviceType
+                                ? 'Choose a service type'
+                                : 'Keep existing name'}
+                            </option>
+
+                            {PLAYLIST_SERVICE_TYPE_OPTIONS.map(
+                              (option) => (
+                                <option
+                                  key={option}
+                                  value={option}
+                                >
+                                  {option}
+                                </option>
+                              )
+                            )}
+                          </select>
                         </label>
 
                         <label className="playlist-metadata-field">
@@ -5241,6 +5897,10 @@ function App() {
                             }
                             onChange={
                               handleSavedPlaylistMetadataChange
+                            }
+                            disabled={
+                              managedPlaylist?.reusable !==
+                              false
                             }
                           />
                         </label>
@@ -5259,28 +5919,82 @@ function App() {
                             }
                           />
                         </label>
+
+                        <label
+                          className={
+                            savedPlaylistMetadataForm.serviceType ===
+                            'Other'
+                              ? 'playlist-metadata-field'
+                              : 'playlist-metadata-field playlist-metadata-field--hidden playlist-metadata-field--hidden-mobile-collapse'
+                          }
+                          aria-hidden={
+                            savedPlaylistMetadataForm.serviceType !==
+                            'Other'
+                          }
+                        >
+                          <span>
+                            Service Type
+                          </span>
+                          <input
+                            type="text"
+                            name="customServiceType"
+                            value={
+                              savedPlaylistMetadataForm.customServiceType
+                            }
+                            onChange={
+                              handleSavedPlaylistMetadataChange
+                            }
+                            disabled={
+                              managedPlaylist?.reusable !==
+                                false ||
+                              savedPlaylistMetadataForm.serviceType !==
+                                'Other'
+                            }
+                            tabIndex={
+                              savedPlaylistMetadataForm.serviceType ===
+                              'Other'
+                                ? 0
+                                : -1
+                            }
+                            required={
+                              savedPlaylistMetadataForm.serviceType ===
+                              'Other'
+                            }
+                          />
+                        </label>
                       </div>
 
-                    <div className="service-plan-detail-actions">
-                      <button
-                        className="button button-secondary"
-                        onClick={
-                          saveManagedPlaylistMetadata
-                        }
-                      >
-                        Save
-                      </button>
+                    {managedPlaylistIsSaved && (
+                      <p className="playlist-generated-name-preview">
+                        Playlist: {' '}
+                        {managedPlaylistPreviewName ||
+                          managedPlaylist?.name ||
+                          'Select a service type and date'}
+                      </p>
+                    )}
 
-                      <button
-                        className="button button-primary"
-                        onClick={() =>
-                          makePlaylistActiveAndReturnToConsole(
-                            managedPlaylist
-                          )
-                        }
-                      >
-                        Make Active & Return to Console
-                      </button>
+                    <div className="playlist-action-row">
+                      <div className="playlist-primary-actions">
+                        <button
+                          className="button button-secondary"
+                          onClick={
+                            saveManagedPlaylistMetadata
+                          }
+                        >
+                          Save
+                        </button>
+
+                        <button
+                          className="button button-primary"
+                          onClick={() =>
+                            makePlaylistActiveAndReturnToConsole(
+                              managedPlaylist
+                            )
+                          }
+                        >
+                          Make Active & Return to Console
+                        </button>
+                      </div>
 
                       <button
                         className="button button-danger"
@@ -5836,11 +6550,7 @@ function App() {
 
               <button
                 className="modal-close"
-                onClick={() =>
-                  setShowNewSongModal(
-                    false
-                  )
-                }
+                onClick={closeNewSongModal}
               >
                 ×
               </button>
@@ -5893,6 +6603,29 @@ function App() {
             </label>
 
             <label>
+              Language
+
+              <select
+                name="language"
+                value={newSong.language}
+                onChange={
+                  handleNewSongChange
+                }
+              >
+                {SONG_LANGUAGE_OPTIONS.map(
+                  (option) => (
+                    <option
+                      key={option.value}
+                      value={option.value}
+                    >
+                      {option.label}
+                    </option>
+                  )
+                )}
+              </select>
+            </label>
+
+            <label>
               Lyrics
 
               <textarea
@@ -5915,11 +6648,7 @@ Second line`}
             <div className="modal-buttons">
               <button
                 className="button button-secondary"
-                onClick={() =>
-                  setShowNewSongModal(
-                    false
-                  )
-                }
+                onClick={closeNewSongModal}
               >
                 Cancel
               </button>
@@ -5981,7 +6710,9 @@ Second line`}
                       value={playlist.id}
                     >
                       {playlist.reusable === false
-                        ? `${playlist.name} — ${formatShortDateLabel(playlist.serviceDate)}`
+                        ? formatPlaylistDisplayName(
+                            playlist
+                          )
                         : `Reusable: ${playlist.name}`}
                     </option>
                   ))}
@@ -6004,7 +6735,9 @@ Second line`}
                 </div>
 
                 <div className="service-plan-source-name">
-                  {savedPlaylistSource.name}
+                  {formatPlaylistDisplayName(
+                    savedPlaylistSource
+                  )}
                 </div>
 
                 <div className="service-plan-source-list">
@@ -6043,14 +6776,42 @@ Second line`}
             )}
 
             <label>
-              New Playlist Name *
+              Service Type *
 
-              <input
-                name="name"
-                value={savedPlaylistForm.name}
+              <select
+                name="serviceType"
+                value={savedPlaylistForm.serviceType}
                 onChange={handleSavedPlaylistFormChange}
-              />
+              >
+                {PLAYLIST_SERVICE_TYPE_OPTIONS.map(
+                  (option) => (
+                    <option
+                      key={option}
+                      value={option}
+                    >
+                      {option}
+                    </option>
+                  )
+                )}
+              </select>
             </label>
+
+            {savedPlaylistForm.serviceType ===
+              'Other' && (
+              <label>
+                Custom Service Name *
+
+                <input
+                  name="customServiceType"
+                  value={
+                    savedPlaylistForm.customServiceType
+                  }
+                  onChange={
+                    handleSavedPlaylistFormChange
+                  }
+                />
+              </label>
+            )}
 
             <label>
               Service Date *
@@ -6073,6 +6834,12 @@ Second line`}
                 onChange={handleSavedPlaylistFormChange}
               />
             </label>
+
+            <p className="playlist-generated-name-preview">
+              Playlist: {' '}
+              {savedPlaylistPreviewName ||
+                'Select a service type and date'}
+            </p>
 
             <div className="modal-buttons">
               <button
@@ -6430,11 +7197,7 @@ Second line`}
 
               <button
                 className="modal-close"
-                onClick={() =>
-                  setShowEditSongModal(
-                    false
-                  )
-                }
+                onClick={closeEditSongModal}
               >
                 ×
               </button>
@@ -6487,6 +7250,36 @@ Second line`}
             </label>
 
             <label>
+              Language
+
+              <select
+                name="language"
+                value={editSong.language}
+                onChange={
+                  handleEditSongChange
+                }
+              >
+                {editSong.language ===
+                  'UNKNOWN' && (
+                  <option value="UNKNOWN">
+                    Unknown (Legacy)
+                  </option>
+                )}
+
+                {SONG_LANGUAGE_OPTIONS.map(
+                  (option) => (
+                    <option
+                      key={option.value}
+                      value={option.value}
+                    >
+                      {option.label}
+                    </option>
+                  )
+                )}
+              </select>
+            </label>
+
+            <label>
               Lyrics
 
               <textarea
@@ -6502,11 +7295,7 @@ Second line`}
             <div className="modal-buttons">
               <button
                 className="button button-secondary"
-                onClick={() =>
-                  setShowEditSongModal(
-                    false
-                  )
-                }
+                onClick={closeEditSongModal}
               >
                 Cancel
               </button>
