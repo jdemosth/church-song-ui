@@ -287,6 +287,47 @@ function sortServicePlans(servicePlans) {
   })
 }
 
+function isCompletedServicePlan(
+  servicePlan
+) {
+  return servicePlan?.status === 'COMPLETED'
+}
+
+function sortCompletedServicePlans(
+  servicePlans
+) {
+  return [...servicePlans].sort((left, right) => {
+    const rightCompletedAt =
+      right?.completedAt || ''
+    const leftCompletedAt =
+      left?.completedAt || ''
+
+    if (rightCompletedAt !== leftCompletedAt) {
+      return rightCompletedAt.localeCompare(
+        leftCompletedAt
+      )
+    }
+
+    const rightDateTime = `${right?.serviceDate || ''}T${right?.serviceTime || '99:99'}`
+    const leftDateTime = `${left?.serviceDate || ''}T${left?.serviceTime || '99:99'}`
+
+    return rightDateTime.localeCompare(
+      leftDateTime
+    )
+  })
+}
+
+function createReuseServicePlanForm(
+  servicePlan
+) {
+  return {
+    serviceName:
+      servicePlan?.serviceName || '',
+    serviceDate: getTodayDateValue(),
+    serviceTime: '',
+  }
+}
+
 function resolveSongFromCollection(
   song,
   songs
@@ -479,6 +520,67 @@ function formatFullDateLabel(serviceDate) {
     month: 'long',
     day: 'numeric',
   })
+}
+
+function formatCompletionTimestamp(
+  completedAt
+) {
+  if (!completedAt) {
+    return 'Completion time unavailable'
+  }
+
+  const date = new Date(completedAt)
+
+  if (Number.isNaN(date.getTime())) {
+    return completedAt
+  }
+
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function formatServiceOccurrenceName(
+  servicePlan
+) {
+  if (!servicePlan) {
+    return ''
+  }
+
+  const serviceName =
+    servicePlan.serviceName?.trim() || ''
+  const shortDate = formatShortDateLabel(
+    servicePlan.serviceDate
+  )
+
+  if (!serviceName) {
+    return shortDate
+  }
+
+  const normalizedName =
+    serviceName.replace(/\s+/g, ' ').trim()
+  const loweredName =
+    normalizedName.toLowerCase()
+  const loweredShortDate =
+    shortDate.toLowerCase()
+  const isoDate =
+    servicePlan.serviceDate || ''
+
+  if (
+    loweredName.includes(loweredShortDate) ||
+    (isoDate &&
+      loweredName.includes(
+        isoDate.toLowerCase()
+      ))
+  ) {
+    return normalizedName
+  }
+
+  return `${normalizedName} — ${shortDate}`
 }
 
 function formatShortDateLabel(serviceDate) {
@@ -1793,6 +1895,10 @@ function App() {
     setOpenedServicePlanId,
   ] = useState(null)
   const [
+    selectedHistoryServicePlanId,
+    setSelectedHistoryServicePlanId,
+  ] = useState(null)
+  const [
     loadedServicePlanId,
     setLoadedServicePlanId,
   ] = useState(null)
@@ -1854,6 +1960,10 @@ function App() {
   const [
     showSaveServiceModal,
     setShowSaveServiceModal,
+  ] = useState(false)
+  const [
+    showReuseServiceModal,
+    setShowReuseServiceModal,
   ] = useState(false)
   const [
     showUseForTodayModal,
@@ -2064,6 +2174,16 @@ function App() {
     serviceDate: getTodayDateValue(),
     serviceTime: '',
   })
+  const [
+    reuseServicePlanForm,
+    setReuseServicePlanForm,
+  ] = useState(() =>
+    createReuseServicePlanForm()
+  )
+  const [
+    reusedServiceSourceById,
+    setReusedServiceSourceById,
+  ] = useState({})
 
   function handleSettingsChange(event) {
     const { name, value, type, checked } =
@@ -2513,20 +2633,35 @@ function App() {
       const data = await response.json()
       const sortedPlans =
         sortServicePlans(data)
+      const sortedHistory =
+        sortCompletedServicePlans(
+          data.filter((servicePlan) =>
+            isCompletedServicePlan(
+              servicePlan
+            )
+          )
+        )
 
       setServicePlans(sortedPlans)
 
       setOpenedServicePlanId((current) => {
+        const activePlans = sortedPlans.filter(
+          (servicePlan) =>
+            !isCompletedServicePlan(
+              servicePlan
+            )
+        )
+
         if (current == null) {
-          return sortedPlans[0]?.id || null
+          return activePlans[0]?.id || null
         }
 
-        return sortedPlans.some(
+        return activePlans.some(
           (servicePlan) =>
             servicePlan.id === current
         )
           ? current
-          : sortedPlans[0]?.id || null
+          : activePlans[0]?.id || null
       })
 
       setLoadedServicePlanId((current) => {
@@ -2541,6 +2676,25 @@ function App() {
           ? current
           : null
       })
+      setSelectedHistoryServicePlanId(
+        (current) => {
+          if (sortedHistory.length === 0) {
+            return null
+          }
+
+          if (
+            current != null &&
+            sortedHistory.some(
+              (servicePlan) =>
+                servicePlan.id === current
+            )
+          ) {
+            return current
+          }
+
+          return sortedHistory[0].id
+        }
+      )
     } catch (err) {
       setError(err.message)
     }
@@ -2725,8 +2879,30 @@ function App() {
       savedPlaylistMetadataForm.serviceDate,
       savedPlaylistMetadataForm.legacyName
     )
+  const activeServicePlans = useMemo(
+    () =>
+      servicePlans.filter(
+        (servicePlan) =>
+          !isCompletedServicePlan(
+            servicePlan
+          )
+      ),
+    [servicePlans]
+  )
+  const completedServiceHistory = useMemo(
+    () =>
+      sortCompletedServicePlans(
+        servicePlans.filter(
+          (servicePlan) =>
+            isCompletedServicePlan(
+              servicePlan
+            )
+        )
+      ),
+    [servicePlans]
+  )
   const openedServicePlan =
-    servicePlans.find(
+    activeServicePlans.find(
       (servicePlan) =>
         servicePlan.id === openedServicePlanId
     ) || null
@@ -2779,16 +2955,36 @@ function App() {
       servicePlanSourcePlaylist?.songs || []
     ).filter((song) => song != null)
   const upcomingServicePlans =
-    servicePlans.filter(
+    activeServicePlans.filter(
       (servicePlan) =>
         (servicePlan.serviceDate || '') >=
         getTodayDateValue()
     )
+  const selectedHistoryServicePlan =
+    completedServiceHistory.find(
+      (servicePlan) =>
+        servicePlan.id ===
+        selectedHistoryServicePlanId
+    ) ||
+    completedServiceHistory[0] ||
+    null
+  const loadedServicePlanReuseSource =
+    loadedServicePlan == null
+      ? null
+      : completedServiceHistory.find(
+          (servicePlan) =>
+            servicePlan.id ===
+            reusedServiceSourceById[
+              loadedServicePlan.id
+            ]
+        ) || null
   const usingLoadedServicePlan =
     loadedServicePlan != null
   const consoleCollectionLabel =
     usingLoadedServicePlan
-      ? loadedServicePlan.serviceName
+      ? formatServiceOccurrenceName(
+          loadedServicePlan
+        )
       : selectedPlaylist?.name
   const consoleServiceHeaderLabel =
     formatConsoleServiceLabel(
@@ -2797,8 +2993,10 @@ function App() {
     )
   const consoleCollectionTypeLabel =
     usingLoadedServicePlan
-      ? 'Loaded Service Plan'
+      ? 'Working Service'
       : 'Service Playlist'
+  const completableServiceTarget =
+    getCompletableServiceTarget()
 
   const selectedSongPlaylistCount =
     selectedSong == null
@@ -2824,7 +3022,7 @@ function App() {
   const selectedSongServicePlanNames =
     selectedSong == null
       ? []
-      : servicePlans
+      : activeServicePlans
           .filter((servicePlan) =>
             (servicePlan.songs || []).some(
               (song) =>
@@ -3965,6 +4163,17 @@ function App() {
     }))
   }
 
+  function handleReuseServicePlanFormChange(
+    event
+  ) {
+    const { name, value } = event.target
+
+    setReuseServicePlanForm((current) => ({
+      ...current,
+      [name]: value,
+    }))
+  }
+
   function openSaveServiceModal(
     sourcePlaylist = selectedPlaylist
   ) {
@@ -4044,6 +4253,15 @@ function App() {
             serviceName: trimmedServiceName,
             serviceDate,
             serviceTime,
+            serviceType:
+              servicePlanSourcePlaylist?.serviceType ||
+              null,
+            theme:
+              servicePlanSourcePlaylist?.theme ||
+              null,
+            sourcePlaylistId:
+              servicePlanSourcePlaylist?.id ||
+              null,
             songIds: sourcePlaylistSongs.map(
               (song) => song.id
             ),
@@ -4117,6 +4335,11 @@ function App() {
             serviceDate,
             serviceTime:
               servicePlanForm.serviceTime.trim(),
+            serviceType:
+              openedServicePlan.serviceType ||
+              null,
+            theme:
+              openedServicePlan.theme || null,
           }),
         }
       )
@@ -4262,6 +4485,338 @@ function App() {
     }
   }
 
+  async function deleteCompletedHistoryService(
+    servicePlanToDelete
+  ) {
+    if (!servicePlanToDelete) {
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Delete ${formatServiceOccurrenceName(servicePlanToDelete)}?\n\nThis completed service will be permanently removed from Service History.\n\nThis action cannot be undone.`
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    try {
+      setError('')
+      setSuccessMessage('')
+
+      const response = await fetch(
+        `http://localhost:8080/service-plans/history/${servicePlanToDelete.id}`,
+        {
+          method: 'DELETE',
+        }
+      )
+
+      if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
+        throw new Error(
+          message ||
+            'Failed to delete service history record'
+        )
+      }
+
+      const remainingServicePlans =
+        servicePlans.filter(
+          (servicePlan) =>
+            servicePlan.id !==
+            servicePlanToDelete.id
+        )
+      const remainingHistory =
+        sortCompletedServicePlans(
+          remainingServicePlans.filter(
+            (servicePlan) =>
+              isCompletedServicePlan(
+                servicePlan
+              )
+          )
+        )
+
+      setServicePlans(remainingServicePlans)
+      setSelectedHistoryServicePlanId(
+        remainingHistory[0]?.id || null
+      )
+      setReusedServiceSourceById(
+        (current) =>
+          Object.fromEntries(
+            Object.entries(current).filter(
+              ([key]) =>
+                Number(key) !==
+                servicePlanToDelete.id
+            )
+          )
+      )
+      setSuccessMessage(
+        'Service history record deleted.'
+      )
+    } catch (err) {
+      setError(err.message)
+      setSuccessMessage('')
+    }
+  }
+
+  function getCompletableServiceTarget() {
+    if (
+      loadedServicePlan &&
+      !isCompletedServicePlan(
+        loadedServicePlan
+      )
+    ) {
+      return {
+        type: 'service-plan',
+        servicePlan: loadedServicePlan,
+      }
+    }
+
+    if (
+      selectedPlaylist?.reusable === false &&
+      selectedPlaylist?.serviceDate
+    ) {
+      return {
+        type: 'playlist',
+        playlist: selectedPlaylist,
+      }
+    }
+
+    return null
+  }
+
+  async function completeActiveService() {
+    const target =
+      getCompletableServiceTarget()
+
+    if (!target) {
+      setError(
+        'Load a dated active service before completing it'
+      )
+      setSuccessMessage('')
+      return
+    }
+
+    const serviceName =
+      target.type === 'service-plan'
+        ? formatServiceOccurrenceName(
+            target.servicePlan
+          )
+        : formatPlaylistDisplayName(
+            target.playlist
+          )
+    const confirmed = window.confirm(
+      `Complete ${serviceName}?\n\nThe current final song order will be saved to Service History.`
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    try {
+      setError('')
+      setSuccessMessage('')
+
+      const response = await fetch(
+        target.type === 'service-plan'
+          ? `http://localhost:8080/service-plans/${target.servicePlan.id}/complete`
+          : `http://localhost:8080/playlists/${target.playlist.id}/complete-service`,
+        {
+          method: 'POST',
+        }
+      )
+
+      if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
+        throw new Error(
+          message ||
+            'Failed to complete service'
+        )
+      }
+
+      const completedService =
+        await response.json()
+      const nextServicePlans =
+        sortServicePlans(
+          target.type === 'service-plan'
+            ? servicePlans.map(
+                (servicePlan) =>
+                  servicePlan.id ===
+                  completedService.id
+                    ? completedService
+                    : servicePlan
+              )
+            : [
+                ...servicePlans,
+                completedService,
+              ]
+        )
+      const nextActivePlans =
+        nextServicePlans.filter(
+          (servicePlan) =>
+            !isCompletedServicePlan(
+              servicePlan
+            )
+        )
+
+      setServicePlans(nextServicePlans)
+      setSelectedHistoryServicePlanId(
+        completedService.id
+      )
+      setLoadedServicePlanId(null)
+      setOpenedServicePlanId((current) =>
+        current != null &&
+        nextActivePlans.some(
+          (servicePlan) =>
+            servicePlan.id === current
+        )
+          ? current
+          : nextActivePlans[0]?.id || null
+      )
+
+      if (target.type === 'playlist') {
+        const nextPlaylist =
+          reusablePlaylists[0] ||
+          playlists.find(
+            (playlist) =>
+              playlist.id !==
+              target.playlist.id
+          ) ||
+          null
+
+        setSelectedPlaylist(nextPlaylist)
+      }
+
+      setCurrentSong(null)
+      setProjectionSong(null)
+      setCurrentSongSourceId(null)
+      setSectionIndex(0)
+      setSuccessMessage(
+        `Completed "${completedService.serviceName}" and saved it to Service History.`
+      )
+    } catch (err) {
+      setError(err.message)
+      setSuccessMessage('')
+    }
+  }
+
+  function openReuseServiceModal(
+    servicePlan
+  ) {
+    if (!servicePlan) {
+      return
+    }
+
+    setSelectedHistoryServicePlanId(
+      servicePlan.id
+    )
+    setReuseServicePlanForm(
+      createReuseServicePlanForm(
+        servicePlan
+      )
+    )
+    setShowReuseServiceModal(true)
+    setError('')
+    setSuccessMessage('')
+  }
+
+  function closeReuseServiceModal() {
+    setShowReuseServiceModal(false)
+    setReuseServicePlanForm(
+      createReuseServicePlanForm()
+    )
+  }
+
+  async function reuseSelectedHistoryService() {
+    if (!selectedHistoryServicePlan) {
+      return
+    }
+
+    const trimmedServiceName =
+      reuseServicePlanForm.serviceName.trim()
+    const trimmedServiceDate =
+      reuseServicePlanForm.serviceDate.trim()
+
+    if (
+      !trimmedServiceName ||
+      !trimmedServiceDate
+    ) {
+      setError(
+        'Service name and date are required'
+      )
+      setSuccessMessage('')
+      return
+    }
+
+    try {
+      setError('')
+      setSuccessMessage('')
+
+      const response = await fetch(
+        `http://localhost:8080/service-plans/${selectedHistoryServicePlan.id}/reuse`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type':
+              'application/json',
+          },
+          body: JSON.stringify({
+            serviceName: trimmedServiceName,
+            serviceType: trimmedServiceName,
+            serviceDate: trimmedServiceDate,
+            serviceTime:
+              reuseServicePlanForm.serviceTime.trim(),
+          }),
+        }
+      )
+
+      if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
+        throw new Error(
+          message ||
+            'Failed to reuse service'
+        )
+      }
+
+      const reusedServicePlan =
+        await response.json()
+      const nextServicePlans =
+        sortServicePlans([
+          ...servicePlans,
+          reusedServicePlan,
+        ])
+
+      setServicePlans(nextServicePlans)
+      setOpenedServicePlanId(
+        reusedServicePlan.id
+      )
+      setLoadedServicePlanId(
+        reusedServicePlan.id
+      )
+      setSelectedPlaylist(null)
+      setReusedServiceSourceById(
+        (current) => ({
+          ...current,
+          [reusedServicePlan.id]:
+            selectedHistoryServicePlan.id,
+        })
+      )
+      setShowReuseServiceModal(false)
+      setActiveView('operator')
+      setSuccessMessage(
+        `Created a new working service from "${selectedHistoryServicePlan.serviceName}" for ${formatFullDateLabel(reusedServicePlan.serviceDate)}.`
+      )
+    } catch (err) {
+      setError(err.message)
+      setSuccessMessage('')
+    }
+  }
+
   function openServicePlanInConsole(
     servicePlan
   ) {
@@ -4272,10 +4827,6 @@ function App() {
     setLoadedServicePlanId(servicePlan.id)
     setOpenedServicePlanId(servicePlan.id)
     setActiveView('operator')
-  }
-
-  function returnToActivePlaylist() {
-    setLoadedServicePlanId(null)
   }
 
   function openNewSavedPlaylistModal() {
@@ -5400,6 +5951,26 @@ function App() {
 
           <button
             className={
+              activeView ===
+              'serviceHistory'
+                ? 'side-link active'
+                : 'side-link'
+            }
+            onClick={() =>
+              setActiveView(
+                'serviceHistory'
+              )
+            }
+          >
+            <span className="nav-icon">
+              ☰
+            </span>
+
+            Service History
+          </button>
+
+          <button
+            className={
               activeView === 'settings'
                 ? 'side-link active'
                 : 'side-link'
@@ -5645,76 +6216,74 @@ function App() {
                   </div>
                 </div>
 
-                {playlists.length > 0 && (
-                  <select
-                    className="playlist-select"
-                    value={
-                      selectedPlaylist?.id ||
-                      ''
-                    }
-                    onChange={(event) => {
-                      const playlist =
-                        playlists.find(
-                          (item) =>
-                            item.id ===
-                            Number(
-                              event.target
-                                .value
-                            )
-                        )
-
-                      setSelectedPlaylist(
-                        playlist
-                      )
-                    }}
-                  >
-                    {playlists.map(
-                      (playlist) => (
-                        <option
-                          key={playlist.id}
-                          value={
-                            playlist.id
-                          }
-                        >
-                          {formatPlaylistDisplayName(
-                            playlist
-                          )}
-                        </option>
-                      )
-                    )}
-                  </select>
-                )}
-
-                {loadedServicePlan && (
-                  <div className="inline-note">
-                    This console is currently
-                    showing the saved service
-                    plan for{' '}
-                    {formatServiceSchedule(
-                      loadedServicePlan
-                    )}
-                    . The active reusable
-                    playlist remains{' '}
-                    <strong>
-                      {selectedPlaylist?.name ||
-                        'unchanged'}
-                    </strong>
-                    .
-                  </div>
-                )}
-
-                {loadedServicePlan && (
-                  <div className="playlist-library-actions service-plan-console-actions">
-                    <button
-                      className="button button-secondary inline-button"
-                      onClick={
-                        returnToActivePlaylist
+                {!loadedServicePlan &&
+                  playlists.length > 0 && (
+                  <div className="service-card-playlist-picker">
+                    <select
+                      className="playlist-select"
+                      value={
+                        selectedPlaylist?.id ||
+                        ''
                       }
+                      onChange={(event) => {
+                        const playlist =
+                          playlists.find(
+                            (item) =>
+                              item.id ===
+                              Number(
+                                event.target
+                                  .value
+                              )
+                          )
+
+                        setSelectedPlaylist(
+                          playlist
+                        )
+                      }}
                     >
-                      Use Active Playlist
-                    </button>
+                      {playlists.map(
+                        (playlist) => (
+                          <option
+                            key={playlist.id}
+                            value={
+                              playlist.id
+                            }
+                          >
+                            {formatPlaylistDisplayName(
+                              playlist
+                            )}
+                          </option>
+                        )
+                      )}
+                    </select>
                   </div>
                 )}
+
+                {loadedServicePlanReuseSource && (
+                  <div className="inline-note">
+                    Reused from:{' '}
+                    <strong>
+                      {formatServiceOccurrenceName(
+                        loadedServicePlanReuseSource
+                      )}
+                    </strong>
+                  </div>
+                )}
+
+                <div className="playlist-library-actions service-plan-console-actions">
+                  <button
+                    className="button button-secondary inline-button"
+                    onClick={
+                      completeActiveService
+                    }
+                    disabled={
+                      completableServiceTarget ==
+                      null
+                    }
+                  >
+                    Complete Service
+                  </button>
+                </div>
 
                 <div className="service-song-list">
                   {playlistSongs.map(
@@ -6413,6 +6982,17 @@ function App() {
               </div>
 
               <div className="header-right">
+                <button
+                  className="button button-secondary"
+                  onClick={() =>
+                    setActiveView(
+                      'serviceHistory'
+                    )
+                  }
+                >
+                  Service History
+                </button>
+
                 <button
                   className="button button-secondary"
                   onClick={() =>
@@ -7378,6 +7958,329 @@ function App() {
           </div>
         )}
 
+        {activeView === 'serviceHistory' && (
+          <div className="admin-view">
+            <header className="service-header">
+              <div>
+                <p className="page-kicker">
+                  Service Records
+                </p>
+
+                <h2>Service History</h2>
+
+                <p className="header-description">
+                  Review completed services,
+                  inspect their final song
+                  order, and reuse them as new
+                  working services.
+                </p>
+              </div>
+
+              <div className="header-right">
+                <button
+                  className="button button-secondary"
+                  onClick={() =>
+                    setActiveView('playlists')
+                  }
+                >
+                  Manage Playlists
+                </button>
+
+                <button
+                  className="button button-secondary"
+                  onClick={() =>
+                    setActiveView('operator')
+                  }
+                >
+                  Worship Console
+                </button>
+              </div>
+            </header>
+
+            <div className="playlists-management-grid">
+              <section className="console-card playlist-list-card">
+                <div className="card-header">
+                  <div>
+                    <p className="card-kicker">
+                      Completed Services
+                    </p>
+
+                    <h3>History</h3>
+                  </div>
+
+                  <span className="number-pill">
+                    {
+                      completedServiceHistory.length
+                    }
+                  </span>
+                </div>
+
+                <div className="playlist-management-list service-history-list">
+                  {completedServiceHistory.map(
+                    (servicePlan) => (
+                      <div
+                        key={servicePlan.id}
+                        className={
+                          selectedHistoryServicePlan?.id ===
+                          servicePlan.id
+                            ? 'playlist-management-item active'
+                            : 'playlist-management-item'
+                        }
+                        role="button"
+                        tabIndex="0"
+                        onClick={() =>
+                          setSelectedHistoryServicePlanId(
+                            servicePlan.id
+                          )
+                        }
+                        onKeyDown={(
+                          event
+                        ) => {
+                          if (
+                            event.key ===
+                              'Enter' ||
+                            event.key === ' '
+                          ) {
+                            event.preventDefault()
+                            setSelectedHistoryServicePlanId(
+                              servicePlan.id
+                            )
+                          }
+                        }}
+                      >
+                        <div className="playlist-management-copy">
+                          <strong>
+                            {servicePlan.serviceName}
+                          </strong>
+
+                          <span>
+                            {formatShortDateLabel(
+                              servicePlan.serviceDate
+                            )}{' '}
+                            •{' '}
+                            {(
+                              servicePlan.songs ||
+                              []
+                            ).filter(
+                              (song) =>
+                                song != null
+                            ).length}{' '}
+                            songs
+                          </span>
+
+                          {servicePlan.theme && (
+                            <span>
+                              Theme:{' '}
+                              {servicePlan.theme}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="service-history-actions">
+                          <button
+                            className="button button-secondary inline-button"
+                            onClick={(
+                              event
+                            ) => {
+                              event.stopPropagation()
+                              setSelectedHistoryServicePlanId(
+                                servicePlan.id
+                              )
+                            }}
+                          >
+                            View
+                          </button>
+
+                          <button
+                            className="button button-primary inline-button"
+                            onClick={(
+                              event
+                            ) => {
+                              event.stopPropagation()
+                              openReuseServiceModal(
+                                servicePlan
+                              )
+                            }}
+                          >
+                            Reuse
+                          </button>
+
+                          <button
+                            className="button button-danger inline-button"
+                            onClick={(
+                              event
+                            ) => {
+                              event.stopPropagation()
+                              deleteCompletedHistoryService(
+                                servicePlan
+                              )
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  )}
+
+                  {completedServiceHistory.length ===
+                    0 && (
+                    <div className="empty-state">
+                      No completed services
+                      yet. Finish a service in
+                      the Worship Console to
+                      save it here.
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              <section className="console-card playlist-detail-card">
+                <div className="card-header">
+                  <div>
+                    <p className="card-kicker">
+                      Historical Snapshot
+                    </p>
+
+                    <h3>
+                      {selectedHistoryServicePlan
+                        ?.serviceName ||
+                        'Select a Completed Service'}
+                    </h3>
+                  </div>
+                </div>
+
+                <div className="playlist-detail-body">
+                  {selectedHistoryServicePlan ? (
+                    <div className="history-service-detail">
+                      <div className="history-service-summary">
+                        <div className="history-service-meta-grid">
+                          <div className="history-service-meta-item">
+                            <span>
+                              Service Date
+                            </span>
+                            <strong>
+                              {formatFullDateLabel(
+                                selectedHistoryServicePlan.serviceDate
+                              )}
+                            </strong>
+                          </div>
+
+                          <div className="history-service-meta-item">
+                            <span>
+                              Completed
+                            </span>
+                            <strong>
+                              {formatCompletionTimestamp(
+                                selectedHistoryServicePlan.completedAt
+                              )}
+                            </strong>
+                          </div>
+
+                          <div className="history-service-meta-item">
+                            <span>
+                              Service Type
+                            </span>
+                            <strong>
+                              {selectedHistoryServicePlan.serviceType ||
+                                'Not specified'}
+                            </strong>
+                          </div>
+
+                          <div className="history-service-meta-item">
+                            <span>
+                              Theme
+                            </span>
+                            <strong>
+                              {selectedHistoryServicePlan.theme ||
+                                'No theme'}
+                            </strong>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="playlist-action-row service-history-detail-actions">
+                        <div className="playlist-primary-actions">
+                          <button
+                            className="button button-primary"
+                            onClick={() =>
+                              openReuseServiceModal(
+                                selectedHistoryServicePlan
+                              )
+                            }
+                          >
+                            Reuse This Service
+                          </button>
+                        </div>
+
+                        <button
+                          className="button button-danger"
+                          onClick={() =>
+                            deleteCompletedHistoryService(
+                              selectedHistoryServicePlan
+                            )
+                          }
+                        >
+                          Delete
+                        </button>
+                      </div>
+
+                      <div className="playlist-songs-panel">
+                        <p className="small-title">
+                          Songs Used
+                        </p>
+
+                        <div className="service-song-list playlist-songs-list">
+                          {(
+                            selectedHistoryServicePlan.songs ||
+                            []
+                          )
+                            .filter(
+                              (song) =>
+                                song != null
+                            )
+                            .map(
+                              (
+                                song,
+                                index
+                              ) => (
+                                <div
+                                  key={`history-song-${selectedHistoryServicePlan.id}-${song.id}-${index}`}
+                                  className="service-song selected"
+                                >
+                                  <span className="song-order">
+                                    {index + 1}
+                                  </span>
+
+                                  <div className="service-song-copy">
+                                    <strong>
+                                      {song.title}
+                                    </strong>
+
+                                    <span>
+                                      {song.author ||
+                                        'Unknown author'}
+                                    </span>
+                                  </div>
+                                </div>
+                              )
+                            )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="empty-state">
+                      Choose a completed
+                      service to view its
+                      historical snapshot.
+                    </div>
+                  )}
+                </div>
+              </section>
+            </div>
+          </div>
+        )}
+
         {activeView === 'settings' && (
           <>
             <header className="service-header">
@@ -8294,6 +9197,109 @@ Second line`}
                 onClick={saveServicePlan}
               >
                 Save Service
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showReuseServiceModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <div className="modal-heading">
+              <div>
+                <p className="card-kicker">
+                  Service History
+                </p>
+
+                <h2>
+                  Reuse Historical Service
+                </h2>
+              </div>
+
+              <button
+                className="modal-close"
+                onClick={
+                  closeReuseServiceModal
+                }
+              >
+                ×
+              </button>
+            </div>
+
+            <p className="settings-preview-copy">
+              This creates a new active
+              service from the completed
+              history record for{' '}
+              <strong>
+                {selectedHistoryServicePlan?.serviceName ||
+                  'the selected service'}
+              </strong>
+              . The historical snapshot stays
+              unchanged.
+            </p>
+
+            <label>
+              Service Name
+
+              <input
+                name="serviceName"
+                value={
+                  reuseServicePlanForm.serviceName
+                }
+                onChange={
+                  handleReuseServicePlanFormChange
+                }
+              />
+            </label>
+
+            <label>
+              New Service Date
+
+              <input
+                type="date"
+                name="serviceDate"
+                value={
+                  reuseServicePlanForm.serviceDate
+                }
+                onChange={
+                  handleReuseServicePlanFormChange
+                }
+              />
+            </label>
+
+            <label>
+              Service Time
+
+              <input
+                type="time"
+                name="serviceTime"
+                value={
+                  reuseServicePlanForm.serviceTime
+                }
+                onChange={
+                  handleReuseServicePlanFormChange
+                }
+              />
+            </label>
+
+            <div className="modal-buttons">
+              <button
+                className="button button-secondary"
+                onClick={
+                  closeReuseServiceModal
+                }
+              >
+                Cancel
+              </button>
+
+              <button
+                className="button button-primary"
+                onClick={
+                  reuseSelectedHistoryService
+                }
+              >
+                Create Working Service
               </button>
             </div>
           </div>
