@@ -254,6 +254,8 @@ function createBlankSongForm() {
     songType: 'SLOW',
     familyId: null,
     language: 'ENGLISH',
+    sectionStructure: null,
+    sectionsConfirmed: false,
   }
 }
 
@@ -269,6 +271,10 @@ function createSongFormFromSong(song) {
     songType: song.songType || 'SLOW',
     familyId: song.familyId ?? null,
     language: song.language || 'UNKNOWN',
+    sectionStructure:
+      song.sectionStructure || null,
+    sectionsConfirmed:
+      song.sectionsConfirmed === true,
   }
 }
 
@@ -279,6 +285,30 @@ function sortServicePlans(servicePlans) {
 
     return leftDateTime.localeCompare(rightDateTime)
   })
+}
+
+function resolveSongFromCollection(
+  song,
+  songs
+) {
+  if (!song) {
+    return null
+  }
+
+  if (!Array.isArray(songs)) {
+    return song
+  }
+
+  if (!song.id) {
+    return song
+  }
+
+  return (
+    songs.find(
+      (candidate) =>
+        candidate.id === song.id
+    ) || song
+  )
 }
 
 function formatServiceDate(serviceDate) {
@@ -588,18 +618,206 @@ function buildLanguageVersionsFromSongs(
   return versions
 }
 
+function getValidSongFamilyId(song) {
+  const familyId = song?.familyId
+
+  return Number.isInteger(familyId) && familyId > 0
+    ? familyId
+    : null
+}
+
+function resolveLanguageVersionsForSong(
+  song,
+  songs,
+  familyVersionsByFamilyId
+) {
+  if (!song) {
+    return createEmptyLanguageVersions()
+  }
+
+  const currentSongLanguage =
+    normalizeLanguage(song.language)
+  const familyId = getValidSongFamilyId(song)
+
+  if (familyId) {
+    const cachedVersions =
+      familyVersionsByFamilyId[
+        familyId
+      ]?.versions
+
+    if (cachedVersions) {
+      const versions =
+        createEmptyLanguageVersions()
+
+      Object.entries(cachedVersions).forEach(
+        ([language, familySong]) => {
+          const canonicalLanguage =
+            normalizeLanguage(language)
+
+          if (
+            !familySong ||
+            !SUPPORTED_SONG_LANGUAGES.includes(
+              canonicalLanguage
+            )
+          ) {
+            return
+          }
+
+          const matchingSong = songs.find(
+            (candidate) =>
+              candidate.id === familySong.id
+          )
+
+          versions[canonicalLanguage] =
+            matchingSong || familySong
+        }
+      )
+
+      if (
+        SUPPORTED_SONG_LANGUAGES.includes(
+          currentSongLanguage
+        ) &&
+        !versions[currentSongLanguage]
+      ) {
+        versions[currentSongLanguage] = song
+      }
+
+      return versions
+    }
+
+    const versions =
+      buildLanguageVersionsFromSongs(
+        songs.filter(
+          (candidate) =>
+            candidate.familyId === familyId
+        )
+      )
+
+    if (
+      SUPPORTED_SONG_LANGUAGES.includes(
+        currentSongLanguage
+      ) &&
+      !versions[currentSongLanguage]
+    ) {
+      versions[currentSongLanguage] = song
+    }
+
+    return versions
+  }
+
+  const versions =
+    createEmptyLanguageVersions()
+
+  if (
+    SUPPORTED_SONG_LANGUAGES.includes(
+      currentSongLanguage
+    )
+  ) {
+    versions[currentSongLanguage] = song
+  }
+
+  return versions
+}
+
+function createAddTranslationForm(
+  language = 'ENGLISH',
+  sourceSong = null
+) {
+  return {
+    language,
+    title: '',
+    author: sourceSong?.author || '',
+    lyrics: '',
+  }
+}
+
+function createSectionEditorRowsFromSong(song) {
+  const parsedSections =
+    parseLyricsSections(song)
+  const legacySections =
+    buildLegacySections(song?.lyrics)
+  const storedAssignments =
+    parseStoredSectionStructure(
+      song?.sectionStructure
+    )
+  const canUseConfirmedAssignments =
+    song?.sectionsConfirmed === true &&
+    storedAssignments.length > 0 &&
+    storedAssignments.length ===
+      legacySections.length
+
+  if (canUseConfirmedAssignments) {
+    return legacySections.map(
+      (section, index) => {
+        const assignment =
+          storedAssignments[index] ||
+          createSectionAssignment()
+
+        return {
+          blockIndex: section.blockIndex,
+          type:
+            normalizeSectionType(
+              assignment.type
+            ) || 'UNASSIGNED',
+          verseNumber:
+            assignment.verseNumber || '',
+          customLabel:
+            assignment.customLabel || '',
+          lyrics:
+            section.lines.join('\n') || '',
+          sourceLyrics:
+            section.lines.join('\n') || '',
+        }
+      }
+    )
+  }
+
+  return parsedSections.map((section) => ({
+    blockIndex: section.blockIndex,
+    type:
+      normalizeSectionType(section.type) ||
+      'UNASSIGNED',
+    verseNumber: section.verseNumber || '',
+    customLabel: section.customLabel || '',
+    lyrics: section.lyrics || '',
+    sourceLyrics:
+      section.sourceLyrics || '',
+  }))
+}
+
+function serializeSectionStructure(
+  sectionEditorRows
+) {
+  return JSON.stringify(
+    sectionEditorRows.map((row) => {
+      const assignment =
+        createSectionAssignment({
+          type: row.type,
+          verseNumber: row.verseNumber,
+          customLabel: row.customLabel,
+        })
+
+      return {
+        type: assignment.type,
+        verseNumber:
+          assignment.verseNumber || null,
+        customLabel:
+          assignment.customLabel || '',
+        name: assignment.name,
+      }
+    })
+  )
+}
+
 function findMatchingSectionIndex(
   currentSong,
   nextSong,
   currentIndex
 ) {
   const currentSections =
-    parseLyricsSections(
-      currentSong?.lyrics || ''
-    )
-  const nextSections = parseLyricsSections(
-    nextSong?.lyrics || ''
-  )
+    parseLyricsSections(currentSong)
+  const nextSections =
+    parseLyricsSections(nextSong)
 
   if (nextSections.length === 0) {
     return 0
@@ -875,17 +1093,121 @@ function getNavigationProjectionMode(
   return 'LIVE'
 }
 
-function parseLyricsSections(lyrics) {
+const SECTION_TYPE_OPTIONS = [
+  'VERSE',
+  'CHORUS',
+  'BRIDGE',
+  'PRE_CHORUS',
+  'REFRAIN',
+  'INTRO',
+  'OUTRO',
+  'OTHER',
+]
+
+function normalizeSectionType(type) {
+  const normalizedType = String(type || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[-\s]+/g, '_')
+
+  if (
+    SECTION_TYPE_OPTIONS.includes(
+      normalizedType
+    )
+  ) {
+    return normalizedType
+  }
+
+  if (normalizedType === 'UNASSIGNED') {
+    return 'UNASSIGNED'
+  }
+
+  return ''
+}
+
+function formatSectionName(
+  type,
+  verseNumber = '',
+  customLabel = ''
+) {
+  const normalizedType =
+    normalizeSectionType(type)
+  const normalizedCustomLabel =
+    String(customLabel || '').trim()
+  const normalizedVerseNumber = String(
+    verseNumber || ''
+  ).trim()
+
+  switch (normalizedType) {
+    case 'VERSE':
+      return normalizedVerseNumber
+        ? `Verse ${normalizedVerseNumber}`
+        : 'Verse'
+    case 'CHORUS':
+      return 'Chorus'
+    case 'BRIDGE':
+      return 'Bridge'
+    case 'PRE_CHORUS':
+      return 'Pre-Chorus'
+    case 'REFRAIN':
+      return 'Refrain'
+    case 'INTRO':
+      return 'Intro'
+    case 'OUTRO':
+      return 'Outro'
+    case 'OTHER':
+      return normalizedCustomLabel || 'Other'
+    default:
+      return normalizedCustomLabel || ''
+  }
+}
+
+function createSectionAssignment({
+  type = '',
+  verseNumber = '',
+  customLabel = '',
+  fallbackName = '',
+} = {}) {
+  const normalizedType =
+    normalizeSectionType(type)
+  const normalizedVerseNumber = String(
+    verseNumber || ''
+  ).trim()
+  const normalizedCustomLabel = String(
+    customLabel || ''
+  ).trim()
+
+  return {
+    type: normalizedType,
+    verseNumber:
+      normalizedType === 'VERSE' &&
+      normalizedVerseNumber
+        ? normalizedVerseNumber
+        : '',
+    customLabel:
+      normalizedType === 'OTHER'
+        ? normalizedCustomLabel
+        : '',
+    name:
+      formatSectionName(
+        normalizedType,
+        normalizedVerseNumber,
+        normalizedCustomLabel
+      ) || fallbackName,
+  }
+}
+
+function buildLegacySections(lyrics) {
   if (!lyrics) {
     return []
   }
 
   const lines = lyrics.split('\n')
   const sections = []
-
   let currentSection = {
     name: 'Verse 1',
     lines: [],
+    isExplicit: false,
   }
 
   for (const rawLine of lines) {
@@ -903,19 +1225,228 @@ function parseLyricsSections(lyrics) {
       }
 
       currentSection = {
-        name: match[1],
+        name: match[1].trim(),
         lines: [],
+        isExplicit: true,
       }
-    } else {
-      currentSection.lines.push(line)
+      continue
     }
+
+    currentSection.lines.push(line)
   }
 
   if (currentSection.lines.length > 0) {
     sections.push(currentSection)
   }
 
-  return sections
+  return sections.map((section, index) => ({
+    ...section,
+    blockIndex: index,
+  }))
+}
+
+function createAssignmentFromName(name) {
+  const normalizedName = String(name || '').trim()
+
+  if (!normalizedName) {
+    return createSectionAssignment()
+  }
+
+  const verseMatch =
+    normalizedName.match(/^verse\s+(\d+)$/i)
+
+  if (verseMatch) {
+    return createSectionAssignment({
+      type: 'VERSE',
+      verseNumber: verseMatch[1],
+    })
+  }
+
+  const typeByLabel = {
+    chorus: 'CHORUS',
+    bridge: 'BRIDGE',
+    'pre-chorus': 'PRE_CHORUS',
+    'pre chorus': 'PRE_CHORUS',
+    refrain: 'REFRAIN',
+    intro: 'INTRO',
+    outro: 'OUTRO',
+  }
+
+  const matchedType =
+    typeByLabel[
+      normalizedName.toLowerCase()
+    ]
+
+  if (matchedType) {
+    return createSectionAssignment({
+      type: matchedType,
+    })
+  }
+
+  return createSectionAssignment({
+    type: 'OTHER',
+    customLabel: normalizedName,
+  })
+}
+
+function normalizeLegacySectionNames(
+  sections
+) {
+  let verseCounter = 0
+
+  return sections.map((section) => {
+    const assignment =
+      createAssignmentFromName(section.name)
+
+    if (assignment.type === 'VERSE') {
+      verseCounter += 1
+
+      return {
+        ...section,
+        ...createSectionAssignment({
+          type: 'VERSE',
+          verseNumber: verseCounter,
+        }),
+      }
+    }
+
+    return {
+      ...section,
+      ...assignment,
+    }
+  })
+}
+
+function parseStoredSectionStructure(
+  sectionStructure
+) {
+  if (!sectionStructure) {
+    return []
+  }
+
+  try {
+    const parsed = JSON.parse(sectionStructure)
+
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+
+    const assignments = parsed.map((item) =>
+      ({
+        ...createSectionAssignment({
+        type: item?.type,
+        verseNumber: item?.verseNumber,
+        customLabel:
+          item?.customLabel || item?.name,
+        }),
+        rawName: String(item?.name || '').trim(),
+      })
+    )
+
+    const hasArtificialBlocks =
+      assignments.some(
+        (assignment) =>
+          assignment.type ===
+            'UNASSIGNED' ||
+          /^Block\s+\d+$/i.test(
+            assignment.rawName
+          )
+      )
+
+    return hasArtificialBlocks
+      ? []
+      : assignments
+  } catch {
+    return []
+  }
+}
+
+function parseLyricsSections(songOrLyrics) {
+  const song =
+    typeof songOrLyrics === 'string'
+      ? { lyrics: songOrLyrics }
+      : songOrLyrics || {}
+  const legacySections =
+    normalizeLegacySectionNames(
+      buildLegacySections(song.lyrics)
+    )
+
+  if (legacySections.length === 0) {
+    return []
+  }
+
+  const storedAssignments =
+    parseStoredSectionStructure(
+      song.sectionStructure
+    )
+  const canUseStoredAssignments =
+    storedAssignments.length ===
+    legacySections.length
+
+  let resolvedAssignments
+  let sectionsConfirmed = false
+  let needsSectionReview = false
+
+  if (canUseStoredAssignments) {
+    resolvedAssignments = storedAssignments
+    sectionsConfirmed = Boolean(
+      song.sectionsConfirmed
+    )
+  } else if (legacySections.length === 1) {
+    const singleSection =
+      legacySections[0]
+    const singleAssignment =
+      createAssignmentFromName(
+        singleSection.name
+      )
+
+    resolvedAssignments = [
+      singleAssignment.type
+        ? singleAssignment
+        : createSectionAssignment({
+            type: 'CHORUS',
+          }),
+    ]
+    sectionsConfirmed = true
+  } else {
+    resolvedAssignments = legacySections.map(
+      (section) =>
+        createAssignmentFromName(
+          section.name
+        )
+    )
+    sectionsConfirmed = false
+    needsSectionReview = true
+  }
+
+  return legacySections.map(
+    (section, index) => {
+      const assignment =
+        resolvedAssignments[index] ||
+        createSectionAssignment({
+          type: 'VERSE',
+          verseNumber: index + 1,
+        })
+
+      return {
+        blockIndex: section.blockIndex,
+        type: assignment.type,
+        verseNumber: assignment.verseNumber,
+        customLabel: assignment.customLabel,
+        name:
+          assignment.name ||
+          section.name ||
+          `Verse ${index + 1}`,
+        lyrics: section.lines.join('\n'),
+        lines: section.lines,
+        sourceLyrics: section.lines.join('\n'),
+        isExplicit: section.isExplicit,
+        isStored: canUseStoredAssignments,
+        sectionsConfirmed,
+        needsSectionReview,
+      }
+    }
+  )
 }
 
 function AutoFitLyrics({
@@ -1023,7 +1554,7 @@ function ProjectorDisplay({
       return []
     }
 
-    return parseLyricsSections(song.lyrics)
+    return parseLyricsSections(song)
   }, [song])
 
   const currentSection =
@@ -1241,6 +1772,10 @@ function App() {
   const [currentSong, setCurrentSong] =
     useState(null)
   const [
+    pendingSongsScrollId,
+    setPendingSongsScrollId,
+  ] = useState(null)
+  const [
     currentSongSourceId,
     setCurrentSongSourceId,
   ] = useState(null)
@@ -1293,8 +1828,24 @@ function App() {
     setShowEditSongModal,
   ] = useState(false)
   const [
+    showEditSectionsModal,
+    setShowEditSectionsModal,
+  ] = useState(false)
+  const [
+    showAddTranslationModal,
+    setShowAddTranslationModal,
+  ] = useState(false)
+  const [
     editingSongId,
     setEditingSongId,
+  ] = useState(null)
+  const [
+    editingSectionsSongId,
+    setEditingSectionsSongId,
+  ] = useState(null)
+  const [
+    addTranslationSourceSongId,
+    setAddTranslationSourceSongId,
   ] = useState(null)
   const [
     showDeleteBlockedModal,
@@ -1385,6 +1936,16 @@ function App() {
     createBlankSongForm
   )
   const [
+    sectionEditorRows,
+    setSectionEditorRows,
+  ] = useState([])
+  const [
+    addTranslationForm,
+    setAddTranslationForm,
+  ] = useState(() =>
+    createAddTranslationForm()
+  )
+  const [
     backgroundType,
     setBackgroundType,
   ] = useState(() => {
@@ -1437,6 +1998,9 @@ function App() {
     normalizeProjectionSettings(
       readStoredProjectorSettings()
     )
+  )
+  const manageSongItemRefs = useRef(
+    new Map()
   )
   const [
     settingsForm,
@@ -2236,30 +2800,6 @@ function App() {
       ? 'Loaded Service Plan'
       : 'Service Playlist'
 
-  const previewSong =
-    projectionSong || currentSong
-
-  const previewSections = useMemo(() => {
-    if (!previewSong) {
-      return []
-    }
-
-    return parseLyricsSections(
-      previewSong.lyrics
-    )
-  }, [previewSong])
-
-  const currentSection =
-    previewSections[sectionIndex] ||
-    previewSections[0]
-
-  const canGoToPreviousProjection =
-    sectionIndex > 0
-
-  const canGoToNextProjection =
-    sectionIndex <
-      previewSections.length - 1
-
   const selectedSongPlaylistCount =
     selectedSong == null
       ? 0
@@ -2298,123 +2838,129 @@ function App() {
   const selectedSongUsageCount =
     selectedSongPlaylistCount +
     selectedSongServicePlanNames.length
-  const currentSongResolved = useMemo(() => {
-    if (!currentSong?.id) {
-      return currentSong
+  const selectedSongResolved = useMemo(
+    () =>
+      resolveSongFromCollection(
+        selectedSong,
+        songs
+      ),
+    [selectedSong, songs]
+  )
+  const currentSongResolved = useMemo(
+    () =>
+      resolveSongFromCollection(
+        currentSong,
+        songs
+      ),
+    [currentSong, songs]
+  )
+  const projectionSongResolved = useMemo(
+    () =>
+      resolveSongFromCollection(
+        projectionSong,
+        songs
+      ),
+    [projectionSong, songs]
+  )
+
+  function openSongsAdministration() {
+    const targetSongId =
+      currentSongResolved?.id ??
+      selectedSongResolved?.id ??
+      null
+
+    if (targetSongId != null) {
+      const resolvedSong =
+        songs.find(
+          (song) =>
+            song.id === targetSongId
+        ) || null
+
+      setSelectedSong(resolvedSong)
+      setPendingSongsScrollId(
+        resolvedSong?.id ?? null
+      )
+      setSearch('')
+      setTypeFilter('ALL')
+    } else {
+      setPendingSongsScrollId(null)
     }
 
-    return (
-      songs.find(
-        (song) => song.id === currentSong.id
-      ) || currentSong
-    )
-  }, [currentSong, songs])
+    setActiveView('songs')
+  }
+
+  const previewSong =
+    projectionSongResolved ||
+    currentSongResolved
+  const previewSections = useMemo(() => {
+    if (!previewSong) {
+      return []
+    }
+
+    return parseLyricsSections(previewSong)
+  }, [previewSong])
+  const currentSection =
+    previewSections[sectionIndex] ||
+    previewSections[0]
+  const canGoToPreviousProjection =
+    sectionIndex > 0
+  const canGoToNextProjection =
+    sectionIndex <
+      previewSections.length - 1
   const currentSongSelectionId =
     currentSongSourceId ??
     currentSongResolved?.id ??
     null
+  const selectedSongFamilyId =
+    getValidSongFamilyId(selectedSongResolved)
+  const currentSongFamilyId =
+    getValidSongFamilyId(currentSongResolved)
+  const selectedSongLanguageVersions =
+    useMemo(
+      () =>
+        resolveLanguageVersionsForSong(
+          selectedSongResolved,
+          songs,
+          familyVersionsByFamilyId
+        ),
+      [
+        selectedSongResolved,
+        songs,
+        familyVersionsByFamilyId,
+      ]
+    )
+  const selectedSongSections = useMemo(
+    () =>
+      parseLyricsSections(
+        selectedSongResolved
+      ),
+    [selectedSongResolved]
+  )
   const currentSongLanguageVersions =
-    useMemo(() => {
-      if (!currentSongResolved) {
-        return createEmptyLanguageVersions()
-      }
-
-      const currentSongLanguage =
-        normalizeLanguage(
-          currentSongResolved.language
-        )
-
-      if (currentSongResolved.familyId) {
-        const cachedVersions =
-          familyVersionsByFamilyId[
-            currentSongResolved.familyId
-          ]?.versions
-
-        if (cachedVersions) {
-          const versions =
-            createEmptyLanguageVersions()
-
-          Object.entries(cachedVersions).forEach(
-            ([language, familySong]) => {
-              const canonicalLanguage =
-                normalizeLanguage(
-                  language
-                )
-
-              if (
-                !familySong ||
-                !SUPPORTED_SONG_LANGUAGES.includes(
-                  canonicalLanguage
-                )
-              ) {
-                return
-              }
-
-              const matchingSong = songs.find(
-                (song) =>
-                  song.id === familySong.id
-              )
-
-              versions[canonicalLanguage] =
-                matchingSong || familySong
-            }
-          )
-
-          if (
-            SUPPORTED_SONG_LANGUAGES.includes(
-              currentSongLanguage
-            ) &&
-            !versions[currentSongLanguage]
-          ) {
-            versions[currentSongLanguage] =
-              currentSongResolved
-          }
-
-          return versions
-        }
-
-        const versions =
-          buildLanguageVersionsFromSongs(
-          songs.filter(
-            (song) =>
-              song.familyId ===
-              currentSongResolved.familyId
-          )
-        )
-
-        if (
-          SUPPORTED_SONG_LANGUAGES.includes(
-            currentSongLanguage
-          ) &&
-          !versions[currentSongLanguage]
-        ) {
-          versions[currentSongLanguage] =
-            currentSongResolved
-        }
-
-        return versions
-      }
-
-      const versions =
-        createEmptyLanguageVersions()
-
-      if (
-        SUPPORTED_SONG_LANGUAGES.includes(
-          currentSongLanguage
-        )
-      ) {
-        versions[currentSongLanguage] =
-          currentSongResolved
-      }
-
-      return versions
-    }, [
-      currentSongResolved,
-      familyVersionsByFamilyId,
-      songs,
-    ])
+    useMemo(
+      () =>
+        resolveLanguageVersionsForSong(
+          currentSongResolved,
+          songs,
+          familyVersionsByFamilyId
+        ),
+      [
+        currentSongResolved,
+        songs,
+        familyVersionsByFamilyId,
+      ]
+    )
   const showCurrentSongLanguageSelector =
     Boolean(currentSongResolved)
+  const selectedSongNeedsSectionReview =
+    selectedSongSections.some(
+      (section) => section.needsSectionReview
+    )
+  const selectedSongSectionsConfirmed =
+    selectedSongSections.length > 0 &&
+    selectedSongSections.every(
+      (section) => section.sectionsConfirmed
+    )
 
   useEffect(() => {
     setSavedPlaylistMetadataForm(
@@ -2462,23 +3008,19 @@ function App() {
   }, [projectionMode])
 
   useEffect(() => {
-    const familyId =
-      currentSongResolved?.familyId
-
-    if (!familyId) {
-      return
-    }
-
-    if (
-      familyVersionsByFamilyId[familyId] ||
-      familyVersionsLoadingByFamilyId[familyId]
-    ) {
-      return
-    }
-
     let cancelled = false
+    const familyIdsToLoad = [
+      selectedSongFamilyId,
+      currentSongFamilyId,
+    ].filter(
+      (familyId, index, values) =>
+        familyId != null &&
+        values.indexOf(familyId) === index
+    )
 
-    async function loadSongFamilyMembers() {
+    async function loadSongFamilyMembers(
+      familyId
+    ) {
       try {
         setFamilyVersionsLoadingByFamilyId(
           (current) => ({
@@ -2520,13 +3062,19 @@ function App() {
           return
         }
 
-        console.error(err)
+        console.error(
+          'Could not load translation information.',
+          {
+            method: 'GET',
+            url: `http://localhost:8080/song-families/${familyId}/versions`,
+            error: err,
+          }
+        )
         setFamilyVersionsErrorByFamilyId(
           (current) => ({
             ...current,
             [familyId]:
-              err.message ||
-              'Failed to load language versions',
+              'Could not load translation information.',
           })
         )
       } finally {
@@ -2543,15 +3091,53 @@ function App() {
       }
     }
 
-    loadSongFamilyMembers()
+    familyIdsToLoad.forEach((familyId) => {
+      if (
+        familyVersionsByFamilyId[familyId] ||
+        familyVersionsLoadingByFamilyId[familyId]
+      ) {
+        return
+      }
+
+      loadSongFamilyMembers(familyId)
+    })
 
     return () => {
       cancelled = true
     }
   }, [
-    currentSongResolved?.familyId,
+    selectedSongFamilyId,
+    currentSongFamilyId,
     familyVersionsByFamilyId,
     familyVersionsLoadingByFamilyId,
+  ])
+
+  useEffect(() => {
+    if (
+      activeView !== 'songs' ||
+      pendingSongsScrollId == null
+    ) {
+      return
+    }
+
+    const targetNode =
+      manageSongItemRefs.current.get(
+        pendingSongsScrollId
+      )
+
+    if (!targetNode) {
+      return
+    }
+
+    targetNode.scrollIntoView({
+      block: 'center',
+      behavior: 'smooth',
+    })
+    setPendingSongsScrollId(null)
+  }, [
+    activeView,
+    filteredSongs,
+    pendingSongsScrollId,
   ])
 
   useEffect(() => {
@@ -2610,6 +3196,17 @@ function App() {
     }))
   }
 
+  function handleAddTranslationChange(
+    event
+  ) {
+    const { name, value } = event.target
+
+    setAddTranslationForm((current) => ({
+      ...current,
+      [name]: value,
+    }))
+  }
+
   function closeNewSongModal() {
     setShowNewSongModal(false)
     setNewSong(createBlankSongForm())
@@ -2619,6 +3216,20 @@ function App() {
     setShowEditSongModal(false)
     setEditingSongId(null)
     setEditSong(createBlankSongForm())
+  }
+
+  function closeEditSectionsModal() {
+    setShowEditSectionsModal(false)
+    setEditingSectionsSongId(null)
+    setSectionEditorRows([])
+  }
+
+  function closeAddTranslationModal() {
+    setShowAddTranslationModal(false)
+    setAddTranslationSourceSongId(null)
+    setAddTranslationForm(
+      createAddTranslationForm()
+    )
   }
 
   async function createSong() {
@@ -2680,6 +3291,100 @@ function App() {
       createSongFormFromSong(resolvedSong)
     )
     setShowEditSongModal(true)
+  }
+
+  function openEditSectionsModal(
+    song = selectedSongResolved
+  ) {
+    const resolvedSong =
+      songs.find(
+        (candidate) =>
+          candidate.id === song?.id
+      ) || song
+
+    if (!resolvedSong) {
+      return
+    }
+
+    setSelectedSong(resolvedSong)
+    setEditingSectionsSongId(
+      resolvedSong.id
+    )
+    setSectionEditorRows(
+      createSectionEditorRowsFromSong(
+        resolvedSong
+      )
+    )
+    setShowEditSectionsModal(true)
+  }
+
+  function handleSectionEditorRowChange(
+    rowIndex,
+    updates
+  ) {
+    setSectionEditorRows((current) =>
+      current.map((row, index) => {
+        if (index !== rowIndex) {
+          return row
+        }
+
+        const nextType =
+          updates.type != null
+            ? normalizeSectionType(
+                updates.type
+              ) || 'UNASSIGNED'
+            : row.type
+
+        return {
+          ...row,
+          ...updates,
+          type: nextType,
+          verseNumber:
+            nextType === 'VERSE'
+              ? String(
+                  updates.verseNumber ??
+                    row.verseNumber ??
+                    ''
+                )
+              : '',
+          customLabel:
+            nextType === 'OTHER'
+              ? String(
+                  updates.customLabel ??
+                    row.customLabel ??
+                    ''
+                )
+              : '',
+        }
+      })
+    )
+  }
+
+  function openAddTranslationModal(
+    language,
+    song = selectedSongResolved
+  ) {
+    const resolvedSong =
+      songs.find(
+        (candidate) =>
+          candidate.id === song?.id
+      ) || song
+
+    if (!resolvedSong) {
+      return
+    }
+
+    setSelectedSong(resolvedSong)
+    setAddTranslationSourceSongId(
+      resolvedSong.id
+    )
+    setAddTranslationForm(
+      createAddTranslationForm(
+        language,
+        resolvedSong
+      )
+    )
+    setShowAddTranslationModal(true)
   }
 
   async function updateSong() {
@@ -2797,6 +3502,272 @@ function App() {
       }
 
       closeEditSongModal()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function createTranslation() {
+    if (!addTranslationSourceSongId) {
+      return
+    }
+
+    try {
+      setError('')
+
+      const response = await fetch(
+        `http://localhost:8080/songs/${addTranslationSourceSongId}/translations`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type':
+              'application/json',
+          },
+          body: JSON.stringify(
+            addTranslationForm
+          ),
+        }
+      )
+
+      if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
+        throw new Error(
+          message ||
+            'Failed to add translation'
+        )
+      }
+
+      const data = await response.json()
+      const nextFamilyVersions =
+        data.versions
+      const nextFamilyId =
+        nextFamilyVersions?.familyId ??
+        data.sourceSong?.familyId ??
+        null
+      const updatedSongs = [
+        data.sourceSong,
+        data.translationSong,
+        ...Object.values(
+          nextFamilyVersions?.versions || {}
+        ),
+      ].filter(Boolean)
+
+      setSongs((current) => {
+        const byId = new Map(
+          current.map((song) => [
+            song.id,
+            song,
+          ])
+        )
+
+        updatedSongs.forEach((song) => {
+          byId.set(song.id, song)
+        })
+
+        return Array.from(byId.values())
+      })
+
+      if (nextFamilyId) {
+        setFamilyVersionsByFamilyId(
+          (current) => ({
+            ...current,
+            [nextFamilyId]:
+              nextFamilyVersions,
+          })
+        )
+        setFamilyVersionsErrorByFamilyId(
+          (current) => ({
+            ...current,
+            [nextFamilyId]: '',
+          })
+        )
+        setFamilyVersionsLoadingByFamilyId(
+          (current) => ({
+            ...current,
+            [nextFamilyId]: false,
+          })
+        )
+      }
+
+      setSelectedSong(data.sourceSong)
+
+      if (
+        currentSong?.id ===
+        data.sourceSong?.id
+      ) {
+        setCurrentSong(data.sourceSong)
+      }
+
+      if (
+        projectionSong?.id ===
+        data.sourceSong?.id
+      ) {
+        setProjectionSong(data.sourceSong)
+      }
+
+      setSuccessMessage(
+        `Added ${getLanguageLabel(addTranslationForm.language)} translation for "${data.sourceSong.title}".`
+      )
+      closeAddTranslationModal()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function saveSectionAssignments() {
+    if (!editingSectionsSongId) {
+      return
+    }
+
+    const hasUnassignedRows =
+      sectionEditorRows.some((row) => {
+        if (
+          normalizeSectionType(row.type) ===
+          'UNASSIGNED'
+        ) {
+          return true
+        }
+
+        if (
+          normalizeSectionType(row.type) ===
+            'VERSE' &&
+          !String(
+            row.verseNumber || ''
+          ).trim()
+        ) {
+          return true
+        }
+
+        if (
+          normalizeSectionType(row.type) ===
+            'OTHER' &&
+          !String(
+            row.customLabel || ''
+          ).trim()
+        ) {
+          return true
+        }
+
+        return false
+      })
+
+    if (hasUnassignedRows) {
+      setError(
+        'Assign a valid label to every existing section before saving.'
+      )
+      return
+    }
+
+    const sourceSong =
+      songs.find(
+        (song) =>
+          song.id === editingSectionsSongId
+      ) || selectedSongResolved
+
+    if (!sourceSong) {
+      return
+    }
+
+    try {
+      setError('')
+
+      const response = await fetch(
+        `http://localhost:8080/songs/${editingSectionsSongId}/sections`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type':
+              'application/json',
+          },
+          body: JSON.stringify({
+            sections: sectionEditorRows.map(
+              (row) => ({
+                type: row.type,
+                verseNumber:
+                  row.type === 'VERSE'
+                    ? Number(
+                        row.verseNumber
+                      )
+                    : null,
+                customLabel:
+                  row.type === 'OTHER'
+                    ? row.customLabel
+                    : '',
+              })
+            ),
+            sectionsConfirmed: true,
+          }),
+        }
+      )
+
+      if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
+        throw new Error(
+          message ||
+            'Could not save section assignments.'
+        )
+      }
+
+      const updatedSong =
+        await response.json()
+
+      setSongs((current) =>
+        current.map((song) =>
+          song.id === updatedSong.id
+            ? updatedSong
+            : song
+        )
+      )
+
+      setPlaylists((current) =>
+        current.map((playlist) => ({
+          ...playlist,
+          songs: (
+            playlist.songs || []
+          ).map((song) =>
+            song?.id === updatedSong.id
+              ? updatedSong
+              : song
+          ),
+        }))
+      )
+
+      setServicePlans((current) =>
+        sortServicePlans(
+          current.map((servicePlan) => ({
+            ...servicePlan,
+            songs: (
+              servicePlan.songs || []
+            ).map((song) =>
+              song?.id === updatedSong.id
+                ? updatedSong
+                : song
+            ),
+          }))
+        )
+      )
+
+      setSelectedSong(updatedSong)
+
+      if (currentSong?.id === updatedSong.id) {
+        setCurrentSong(updatedSong)
+      }
+
+      if (
+        projectionSong?.id ===
+        updatedSong.id
+      ) {
+        setProjectionSong(updatedSong)
+      }
+
+      setSuccessMessage(
+        'Section assignments saved.'
+      )
+      closeEditSectionsModal()
     } catch (err) {
       setError(err.message)
     }
@@ -4401,9 +5372,7 @@ function App() {
                 ? 'side-link active'
                 : 'side-link'
             }
-            onClick={() =>
-              setActiveView('songs')
-            }
+            onClick={openSongsAdministration}
           >
             <span className="nav-icon">
               ♫
@@ -4582,6 +5551,19 @@ function App() {
                     (song) => (
                       <button
                         key={song.id}
+                        ref={(node) => {
+                          if (node) {
+                            manageSongItemRefs.current.set(
+                              song.id,
+                              node
+                            )
+                            return
+                          }
+
+                          manageSongItemRefs.current.delete(
+                            song.id
+                          )
+                        }}
                         className={
                           selectedSong?.id ===
                           song.id
@@ -5120,9 +6102,9 @@ function App() {
                             Sections
                           </p>
 
-                          <div className="section-pills">
+                            <div className="section-pills">
                             {parseLyricsSections(
-                              currentSong.lyrics
+                              currentSong
                             ).map(
                               (
                                 section,
@@ -5516,6 +6498,19 @@ function App() {
                   {filteredSongs.map((song) => (
                     <button
                       key={song.id}
+                      ref={(node) => {
+                        if (node) {
+                          manageSongItemRefs.current.set(
+                            song.id,
+                            node
+                          )
+                          return
+                        }
+
+                        manageSongItemRefs.current.delete(
+                          song.id
+                        )
+                      }}
                       className={
                         selectedSong?.id ===
                         song.id
@@ -5603,14 +6598,21 @@ function App() {
                     <div className="song-detail-meta">
                       <p>
                         <strong>Author:</strong>{' '}
-                        {selectedSong.author ||
+                        {selectedSongResolved.author ||
                           'Unknown author'}
                       </p>
 
                       <p>
                         <strong>Type:</strong>{' '}
                         {getSongTypeLabel(
-                          selectedSong.songType
+                          selectedSongResolved.songType
+                        )}
+                      </p>
+
+                      <p>
+                        <strong>Language:</strong>{' '}
+                        {getLanguageLabel(
+                          selectedSongResolved.language
                         )}
                       </p>
 
@@ -5620,6 +6622,34 @@ function App() {
                           selectedSongUsageCount
                         }
                       </p>
+
+                      <div className="section-status-row">
+                        <p>
+                          <strong>Section Status:</strong>{' '}
+                          {selectedSongNeedsSectionReview
+                            ? 'Needs Section Review'
+                            : selectedSongSectionsConfirmed
+                              ? 'Sections Confirmed ✓'
+                              : selectedSongSections.length ===
+                                    1 &&
+                                  selectedSongSections[0]
+                                    ?.name ===
+                                    'Chorus'
+                                ? 'Chorus established'
+                                : 'No saved section structure'}
+                        </p>
+
+                        <button
+                          type="button"
+                          className="button button-secondary button-compact"
+                          onClick={() =>
+                            openEditSectionsModal()
+                          }
+                          disabled={!selectedSong}
+                        >
+                          Edit Sections
+                        </button>
+                      </div>
                     </div>
 
                     {selectedSongUsageCount >
@@ -5632,8 +6662,97 @@ function App() {
                       </div>
                     )}
 
+                    <div className="translation-availability-card">
+                      <div className="translation-availability-header">
+                        <strong>
+                          Translation Availability
+                        </strong>
+
+                        {selectedSongFamilyId ? (
+                          <span>
+                            Family{' '}
+                            {selectedSongFamilyId}
+                          </span>
+                        ) : (
+                          <span>
+                            Standalone song
+                          </span>
+                        )}
+                      </div>
+
+                      {selectedSongFamilyId &&
+                        familyVersionsErrorByFamilyId[
+                          selectedSongFamilyId
+                        ] && (
+                          <div className="inline-note">
+                            {
+                              familyVersionsErrorByFamilyId[
+                                selectedSongFamilyId
+                              ]
+                            }
+                          </div>
+                        )}
+
+                      <div className="translation-availability-list">
+                        {SUPPORTED_SONG_LANGUAGES.map(
+                          (language) => {
+                            const languageSong =
+                              selectedSongLanguageVersions[
+                                language
+                              ]
+                            const isActive =
+                              normalizeLanguage(
+                                selectedSongResolved.language
+                              ) === language
+                            const isAvailable =
+                              Boolean(
+                                languageSong
+                              )
+
+                            return (
+                              <div
+                                key={`translation-availability-${language}`}
+                                className="translation-availability-row"
+                              >
+                                <div className="translation-availability-copy">
+                                  <strong>
+                                    {getLanguageLabel(
+                                      language
+                                    )}
+                                  </strong>
+
+                                  <span>
+                                    {isActive
+                                      ? 'Active'
+                                      : isAvailable
+                                        ? 'Available'
+                                        : 'Missing'}
+                                  </span>
+                                </div>
+
+                                {!isAvailable && (
+                                  <button
+                                    type="button"
+                                    className="text-button"
+                                    onClick={() =>
+                                      openAddTranslationModal(
+                                        language,
+                                        selectedSongResolved
+                                      )
+                                    }
+                                  >
+                                    Add Translation
+                                  </button>
+                                )}
+                              </div>
+                            )
+                          }
+                        )}
+                      </div>
+                    </div>
+
                     <div className="song-lyrics-preview">
-                      {selectedSong.lyrics ||
+                      {selectedSongResolved.lyrics ||
                         'No lyrics added yet.'}
                     </div>
 
@@ -7305,6 +8424,336 @@ Second line`}
                 onClick={updateSong}
               >
                 Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddTranslationModal && (
+        <div className="modal-overlay">
+          <div className="modal modal-wide">
+            <div className="modal-heading">
+              <div>
+                <p className="card-kicker">
+                  Song Translation
+                </p>
+
+                <h2>
+                  Add Translation
+                </h2>
+              </div>
+
+              <button
+                className="modal-close"
+                onClick={
+                  closeAddTranslationModal
+                }
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="translation-editor-grid">
+              <section className="translation-source-panel">
+                <p className="translation-panel-kicker">
+                  SOURCE —{' '}
+                  {getLanguageLabel(
+                    selectedSongResolved?.language
+                  )}
+                </p>
+
+                <div className="translation-source-block">
+                  <span>Title</span>
+                  <strong>
+                    {selectedSongResolved?.title ||
+                      'No title'}
+                  </strong>
+                </div>
+
+                <div className="translation-source-block">
+                  <span>Lyrics</span>
+                  <div className="translation-source-lyrics">
+                    {selectedSongResolved?.lyrics ||
+                      'No lyrics added yet.'}
+                  </div>
+                </div>
+              </section>
+
+              <section className="translation-form-panel">
+                <p className="translation-panel-kicker">
+                  TRANSLATION —{' '}
+                  {getLanguageLabel(
+                    addTranslationForm.language
+                  )}
+                </p>
+
+                <label>
+                  Translation Language
+
+                  <select
+                    name="language"
+                    value={
+                      addTranslationForm.language
+                    }
+                    disabled
+                  >
+                    {SONG_LANGUAGE_OPTIONS.map(
+                      (option) => (
+                        <option
+                          key={option.value}
+                          value={option.value}
+                        >
+                          {option.label}
+                        </option>
+                      )
+                    )}
+                  </select>
+                </label>
+
+                <label>
+                  Title
+
+                  <input
+                    name="title"
+                    value={
+                      addTranslationForm.title
+                    }
+                    onChange={
+                      handleAddTranslationChange
+                    }
+                  />
+                </label>
+
+                <label>
+                  Author
+
+                  <input
+                    name="author"
+                    value={
+                      addTranslationForm.author
+                    }
+                    onChange={
+                      handleAddTranslationChange
+                    }
+                  />
+                </label>
+
+                <label>
+                  Lyrics
+
+                  <textarea
+                    name="lyrics"
+                    rows="12"
+                    value={
+                      addTranslationForm.lyrics
+                    }
+                    onChange={
+                      handleAddTranslationChange
+                    }
+                  />
+                </label>
+              </section>
+            </div>
+
+            <div className="modal-buttons">
+              <button
+                className="button button-secondary"
+                onClick={
+                  closeAddTranslationModal
+                }
+              >
+                Cancel
+              </button>
+
+              <button
+                className="button button-primary"
+                onClick={createTranslation}
+              >
+                Save Translation
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showEditSectionsModal && (
+        <div className="modal-overlay">
+          <div className="modal modal-wide">
+            <div className="modal-heading">
+              <div>
+                <p className="card-kicker">
+                  Song Structure
+                </p>
+
+                <h2>
+                  Edit Sections
+                </h2>
+              </div>
+
+              <button
+                className="modal-close"
+                onClick={
+                  closeEditSectionsModal
+                }
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="section-review-status">
+              {sectionEditorRows.length === 1 &&
+              !selectedSongNeedsSectionReview
+                ? 'Single lyric block defaults to Chorus until you choose otherwise.'
+                : selectedSongNeedsSectionReview
+                  ? 'Needs Section Review'
+                  : 'Sections Confirmed ✓'}
+            </div>
+
+            <div className="section-editor-list">
+              {sectionEditorRows.map(
+                (row, rowIndex) => (
+                <section
+                  key={`section-editor-${row.blockIndex}-${rowIndex}`}
+                  className="section-editor-card"
+                >
+                  <div className="section-editor-header">
+                    <strong>
+                      Existing Section{' '}
+                      {row.blockIndex + 1}
+                    </strong>
+
+                    <span>
+                      Current label:{' '}
+                      {createSectionAssignment(
+                        {
+                          type: row.type,
+                          verseNumber:
+                            row.verseNumber,
+                          customLabel:
+                            row.customLabel,
+                          fallbackName:
+                            `Verse ${row.blockIndex + 1}`,
+                        }
+                      ).name}
+                    </span>
+                  </div>
+
+                  <div className="section-editor-fields">
+                    <label>
+                      Type
+
+                      <select
+                        value={row.type}
+                        onChange={(event) =>
+                          handleSectionEditorRowChange(
+                            rowIndex,
+                            {
+                              type:
+                                event.target
+                                  .value,
+                            }
+                          )
+                        }
+                      >
+                        <option value="UNASSIGNED">
+                          Choose section
+                        </option>
+
+                        {SECTION_TYPE_OPTIONS.map(
+                          (option) => (
+                            <option
+                              key={option}
+                              value={option}
+                            >
+                              {formatSectionName(
+                                option
+                              )}
+                            </option>
+                          )
+                        )}
+                      </select>
+                    </label>
+
+                    {row.type === 'VERSE' && (
+                      <label>
+                        Number
+
+                        <input
+                          type="number"
+                          min="1"
+                          value={
+                            row.verseNumber
+                          }
+                          onChange={(event) =>
+                            handleSectionEditorRowChange(
+                              rowIndex,
+                              {
+                                verseNumber:
+                                  event.target
+                                    .value,
+                              }
+                            )
+                          }
+                        />
+                      </label>
+                    )}
+
+                    {row.type === 'OTHER' && (
+                      <label>
+                        Label
+
+                        <input
+                          value={
+                            row.customLabel
+                          }
+                          onChange={(event) =>
+                            handleSectionEditorRowChange(
+                              rowIndex,
+                              {
+                                customLabel:
+                                  event.target
+                                    .value,
+                              }
+                            )
+                          }
+                        />
+                      </label>
+                    )}
+                  </div>
+
+                  <div className="section-editor-preview">
+                    <span>
+                      Lyrics Preview
+                    </span>
+
+                    <div className="section-editor-lyrics">
+                      {row.lyrics ||
+                        'No lyrics in this block.'}
+                    </div>
+                  </div>
+                </section>
+              )
+              )}
+            </div>
+
+            <div className="modal-buttons">
+              <button
+                className="button button-secondary"
+                onClick={
+                  closeEditSectionsModal
+                }
+              >
+                Cancel
+              </button>
+
+              <button
+                className="button button-primary"
+                onClick={
+                  saveSectionAssignments
+                }
+              >
+                Save Sections
               </button>
             </div>
           </div>
