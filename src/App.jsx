@@ -1181,6 +1181,37 @@ async function readErrorMessage(response) {
   }
 }
 
+function getDownloadFileName(
+  response,
+  fallbackFileName
+) {
+  const contentDisposition =
+    response.headers.get(
+      'content-disposition'
+    ) || ''
+  const utfMatch =
+    contentDisposition.match(
+      /filename\*=UTF-8''([^;]+)/
+    )
+
+  if (utfMatch?.[1]) {
+    return decodeURIComponent(
+      utfMatch[1]
+    )
+  }
+
+  const simpleMatch =
+    contentDisposition.match(
+      /filename="([^"]+)"/
+    )
+
+  if (simpleMatch?.[1]) {
+    return simpleMatch[1]
+  }
+
+  return fallbackFileName
+}
+
 function getNavigationProjectionMode(
   currentMode
 ) {
@@ -1973,6 +2004,14 @@ function App() {
     showSavedPlaylistModal,
     setShowSavedPlaylistModal,
   ] = useState(false)
+  const [
+    isCreatingDatabaseBackup,
+    setIsCreatingDatabaseBackup,
+  ] = useState(false)
+  const [
+    lastBackupCreatedAt,
+    setLastBackupCreatedAt,
+  ] = useState('')
 
   const [
     draggedSongIndex,
@@ -2228,6 +2267,79 @@ function App() {
       nextSettings.defaultBackgroundVariant
     )
     setError('')
+  }
+
+  async function downloadDatabaseBackup() {
+    try {
+      setIsCreatingDatabaseBackup(true)
+      setError('')
+      setSuccessMessage('')
+
+      const response = await fetch(
+        'http://localhost:8080/admin/backup/database'
+      )
+
+      if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
+        throw new Error(
+          message ||
+            'Could not create database backup.'
+        )
+      }
+
+      const backupBlob =
+        await response.blob()
+
+      if (backupBlob.size <= 0) {
+        throw new Error(
+          'Could not create database backup.'
+        )
+      }
+
+      const fileName =
+        getDownloadFileName(
+          response,
+          'churchsongs-backup.db'
+        )
+      const downloadUrl =
+        window.URL.createObjectURL(
+          backupBlob
+        )
+      const link =
+        document.createElement('a')
+
+      link.href = downloadUrl
+      link.download = fileName
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(
+        downloadUrl
+      )
+
+      setLastBackupCreatedAt(
+        new Date().toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        })
+      )
+      setSuccessMessage(
+        'Database backup created successfully.'
+      )
+    } catch (err) {
+      setError(
+        err.message ||
+          'Could not create database backup.'
+      )
+      setSuccessMessage('')
+    } finally {
+      setIsCreatingDatabaseBackup(false)
+    }
   }
 
   const runProjectionCommand = useEffectEvent(
@@ -5971,6 +6083,26 @@ function App() {
 
           <button
             className={
+              activeView ===
+              'backupExport'
+                ? 'side-link active'
+                : 'side-link'
+            }
+            onClick={() =>
+              setActiveView(
+                'backupExport'
+              )
+            }
+          >
+            <span className="nav-icon">
+              ⤓
+            </span>
+
+            Backup & Export
+          </button>
+
+          <button
+            className={
               activeView === 'settings'
                 ? 'side-link active'
                 : 'side-link'
@@ -8550,6 +8682,94 @@ function App() {
                     projectionSettings
                   }
                 />
+              </section>
+            </div>
+          </>
+        )}
+
+        {activeView ===
+          'backupExport' && (
+          <>
+            <header className="service-header">
+              <div>
+                <p className="page-kicker">
+                  Administrative Tools
+                </p>
+
+                <h2>
+                  Backup & Export
+                </h2>
+
+                <p className="header-description">
+                  Protect your Church Song
+                  data by creating a full
+                  database backup.
+                </p>
+              </div>
+
+              <div className="header-right">
+                <button
+                  className="button button-secondary"
+                  onClick={() =>
+                    setActiveView('operator')
+                  }
+                >
+                  Worship Console
+                </button>
+              </div>
+            </header>
+
+            <div className="settings-grid">
+              <section className="console-card">
+                <div className="card-header">
+                  <div>
+                    <p className="card-kicker">
+                      Full Database Backup
+                    </p>
+
+                    <h3>
+                      Download Backup
+                    </h3>
+                  </div>
+                </div>
+
+                <div className="settings-form">
+                  <p className="settings-preview-copy">
+                    Includes songs,
+                    translations, playlists,
+                    section corrections,
+                    service plans, and service
+                    history.
+                  </p>
+
+                  <div className="backup-export-actions">
+                    <button
+                      className="button button-primary"
+                      onClick={
+                        downloadDatabaseBackup
+                      }
+                      disabled={
+                        isCreatingDatabaseBackup
+                      }
+                      type="button"
+                    >
+                      {isCreatingDatabaseBackup
+                        ? 'Creating Backup...'
+                        : 'Download Database Backup'}
+                    </button>
+                  </div>
+
+                  <div className="backup-session-status">
+                    <span className="settings-label">
+                      Last backup created
+                    </span>
+
+                    <strong>
+                      {lastBackupCreatedAt ||
+                        'Not created during this session'}
+                    </strong>
+                  </div>
+                </div>
               </section>
             </div>
           </>
