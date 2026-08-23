@@ -102,6 +102,7 @@ button:disabled {
 }
 
 .brand-copy {
+  flex: 1;
   min-width: 0;
 }
 
@@ -110,7 +111,9 @@ button:disabled {
   font-size: 18px;
   font-weight: 700;
   letter-spacing: -0.05em;
-  white-space: nowrap;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .brand p {
@@ -2027,6 +2030,13 @@ button:disabled {
   margin: 0;
 }
 
+.section-status-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
 .button-compact {
   flex: 0 0 auto;
   padding: 8px 12px;
@@ -2066,6 +2076,19 @@ button:disabled {
   gap: 8px;
 }
 
+.translation-availability-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.translation-availability-empty p {
+  margin: 0;
+  color: #526074;
+  font-size: 13px;
+}
+
 .translation-availability-row {
   display: flex;
   align-items: center;
@@ -2075,6 +2098,10 @@ button:disabled {
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   background: #ffffff;
+}
+
+.translation-availability-row-family {
+  align-items: flex-start;
 }
 
 .translation-availability-copy {
@@ -2092,6 +2119,80 @@ button:disabled {
 .translation-availability-copy span {
   color: #718096;
   font-size: 12px;
+}
+
+.translation-availability-copy small {
+  color: #97a3b6;
+  font-size: 11px;
+}
+
+.translation-availability-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.translation-availability-footer {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.text-button-danger {
+  color: #b42318;
+}
+
+.text-button-danger:hover {
+  color: #912018;
+}
+
+.song-family-language-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.song-family-language-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid #e5eaf2;
+}
+
+.song-family-language-pill strong {
+  color: #1d2433;
+  font-size: 12px;
+}
+
+.song-family-language-pill span {
+  color: #6a7688;
+  font-size: 12px;
+}
+
+.link-existing-song-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 200px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.link-existing-song-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #f9fbfd;
 }
 
 .song-lyrics-preview {

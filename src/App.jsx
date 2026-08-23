@@ -29,6 +29,15 @@ const DEFAULT_BACKGROUND_VARIANT =
   'sky-field'
 const DEFAULT_BACKGROUND_TYPE =
   'preset'
+const DEFAULT_APP_SETTINGS = {
+  churchName:
+    'Humility & Mercy Gospel Assembly',
+  churchAbbreviation: 'HMGA',
+  defaultLanguage: 'ENGLISH',
+  defaultBackground:
+    DEFAULT_BACKGROUND_VARIANT,
+  defaultServiceType: 'Sunday Morning',
+}
 const DEFAULT_PROJECTION_SETTINGS = {
   defaultBackgroundVariant:
     DEFAULT_BACKGROUND_VARIANT,
@@ -143,10 +152,12 @@ const PLAYLIST_SERVICE_TYPE_OPTIONS = [
 ]
 
 function createSavedPlaylistForm(
-  overrides = {}
+  overrides = {},
+  defaultServiceType =
+    DEFAULT_APP_SETTINGS.defaultServiceType
 ) {
   return {
-    serviceType: 'Sunday Morning',
+    serviceType: defaultServiceType,
     customServiceType: '',
     serviceDate: getTodayDateValue(),
     theme: '',
@@ -257,6 +268,49 @@ function createBlankSongForm() {
     sectionStructure: null,
     sectionsConfirmed: false,
   }
+}
+
+function normalizeAppSettings(
+  settings
+) {
+  return {
+    churchName:
+      settings?.churchName?.trim() ||
+      DEFAULT_APP_SETTINGS.churchName,
+    churchAbbreviation:
+      settings?.churchAbbreviation?.trim() ||
+      DEFAULT_APP_SETTINGS.churchAbbreviation,
+    defaultLanguage:
+      SUPPORTED_SONG_LANGUAGES.includes(
+        normalizeLanguage(
+          settings?.defaultLanguage
+        )
+      )
+        ? normalizeLanguage(
+            settings?.defaultLanguage
+          )
+        : DEFAULT_APP_SETTINGS.defaultLanguage,
+    defaultBackground:
+      BACKGROUND_OPTIONS.some(
+        (option) =>
+          option.id ===
+          settings?.defaultBackground
+      )
+        ? settings.defaultBackground
+        : DEFAULT_APP_SETTINGS.defaultBackground,
+    defaultServiceType:
+      PLAYLIST_SERVICE_TYPE_OPTIONS.includes(
+        settings?.defaultServiceType
+      )
+        ? settings.defaultServiceType
+        : DEFAULT_APP_SETTINGS.defaultServiceType,
+  }
+}
+
+function createSettingsForm(
+  settings = DEFAULT_APP_SETTINGS
+) {
+  return normalizeAppSettings(settings)
 }
 
 function createSongFormFromSong(song) {
@@ -720,6 +774,18 @@ function buildLanguageVersionsFromSongs(
   return versions
 }
 
+function shouldApplySessionDefaults(
+  currentSongSourceId
+) {
+  return currentSongSourceId == null
+}
+
+function hasRestorableProjectorSession(
+  projectorState
+) {
+  return Boolean(projectorState?.projectionSong)
+}
+
 function getValidSongFamilyId(song) {
   const familyId = song?.familyId
 
@@ -821,6 +887,49 @@ function resolveLanguageVersionsForSong(
   return versions
 }
 
+function resolvePreferredLanguageSong(
+  song,
+  preferredLanguage,
+  songs,
+  familyVersionsByFamilyId
+) {
+  if (!song) {
+    return null
+  }
+
+  const versions =
+    resolveLanguageVersionsForSong(
+      song,
+      songs,
+      familyVersionsByFamilyId
+    )
+  const canonicalPreferredLanguage =
+    normalizeLanguage(preferredLanguage)
+
+  if (
+    SUPPORTED_SONG_LANGUAGES.includes(
+      canonicalPreferredLanguage
+    ) &&
+    versions[canonicalPreferredLanguage]
+  ) {
+    return (
+      songs.find(
+        (candidate) =>
+          candidate.id ===
+          versions[canonicalPreferredLanguage]
+            .id
+      ) ||
+      versions[canonicalPreferredLanguage]
+    )
+  }
+
+  return (
+    songs.find(
+      (candidate) => candidate.id === song.id
+    ) || song
+  )
+}
+
 function createAddTranslationForm(
   language = 'ENGLISH',
   sourceSong = null
@@ -831,6 +940,53 @@ function createAddTranslationForm(
     author: sourceSong?.author || '',
     lyrics: '',
   }
+}
+
+function createLinkExistingSongForm(
+  language = 'ENGLISH'
+) {
+  return {
+    language,
+    search: '',
+  }
+}
+
+function mergeSongsById(
+  existingSongs,
+  updatedSongs
+) {
+  const byId = new Map(
+    (existingSongs || []).map((song) => [
+      song.id,
+      song,
+    ])
+  )
+
+  ;(updatedSongs || [])
+    .filter(Boolean)
+    .forEach((song) => {
+      byId.set(song.id, song)
+    })
+
+  return Array.from(byId.values())
+}
+
+function getSongFamilyDisplayName(
+  familyVersions,
+  fallbackSong
+) {
+  for (const language of SUPPORTED_SONG_LANGUAGES) {
+    const title =
+      familyVersions?.[language]?.title?.trim()
+
+    if (title) {
+      return title
+    }
+  }
+
+  return (
+    fallbackSong?.title?.trim() || 'Song'
+  )
 }
 
 function createSectionEditorRowsFromSong(song) {
@@ -1899,6 +2055,12 @@ function App() {
     currentSongLanguageNotice,
     setCurrentSongLanguageNotice,
   ] = useState('')
+  const [appSettings, setAppSettings] =
+    useState(() =>
+      normalizeAppSettings(
+        DEFAULT_APP_SETTINGS
+      )
+    )
 
   const [selectedSong, setSelectedSong] =
     useState(null)
@@ -1973,6 +2135,10 @@ function App() {
     setShowAddTranslationModal,
   ] = useState(false)
   const [
+    showLinkExistingSongModal,
+    setShowLinkExistingSongModal,
+  ] = useState(false)
+  const [
     editingSongId,
     setEditingSongId,
   ] = useState(null)
@@ -1983,6 +2149,10 @@ function App() {
   const [
     addTranslationSourceSongId,
     setAddTranslationSourceSongId,
+  ] = useState(null)
+  const [
+    linkExistingSongTargetFamilyId,
+    setLinkExistingSongTargetFamilyId,
   ] = useState(null)
   const [
     showDeleteBlockedModal,
@@ -2095,6 +2265,12 @@ function App() {
     createAddTranslationForm()
   )
   const [
+    linkExistingSongForm,
+    setLinkExistingSongForm,
+  ] = useState(() =>
+    createLinkExistingSongForm()
+  )
+  const [
     backgroundType,
     setBackgroundType,
   ] = useState(() => {
@@ -2155,8 +2331,8 @@ function App() {
     settingsForm,
     setSettingsForm,
   ] = useState(() =>
-    normalizeProjectionSettings(
-      readStoredProjectorSettings()
+    createSettingsForm(
+      DEFAULT_APP_SETTINGS
     )
   )
   const [
@@ -2179,7 +2355,10 @@ function App() {
     savedPlaylistForm,
     setSavedPlaylistForm,
   ] = useState(() =>
-    createSavedPlaylistForm()
+    createSavedPlaylistForm(
+      {},
+      DEFAULT_APP_SETTINGS.defaultServiceType
+    )
   )
   const [
     savedPlaylistMetadataForm,
@@ -2237,36 +2416,83 @@ function App() {
     }))
   }
 
-  function saveProjectionSettings() {
-    const nextSettings =
-      normalizeProjectionSettings(
-        settingsForm
-      )
-
-    setProjectionSettings(nextSettings)
-    setSettingsForm(nextSettings)
-    persistProjectorSettings(nextSettings)
+  function initializeFreshSessionDefaults() {
+    setCurrentSongLanguageNotice('')
+    setSelectedSong(null)
+    setCurrentSong(null)
+    setCurrentSongSourceId(null)
+    setProjectionSong(null)
+    setSectionIndex(0)
+    setProjectionMode('LIVE')
     setBackgroundType('preset')
     setBackgroundVariant(
-      nextSettings.defaultBackgroundVariant
+      appSettings.defaultBackground
     )
-    setError('')
+    setCustomBackgroundId(null)
+    setCustomBackgroundName('')
   }
 
-  function restoreDefaultProjectionSettings() {
+  async function saveApplicationSettings() {
     const nextSettings =
-      normalizeProjectionSettings(
-        DEFAULT_PROJECTION_SETTINGS
+      createSettingsForm(settingsForm)
+
+    if (
+      !nextSettings.churchName ||
+      !nextSettings.churchAbbreviation ||
+      !nextSettings.defaultLanguage ||
+      !nextSettings.defaultBackground ||
+      !nextSettings.defaultServiceType
+    ) {
+      setError(
+        'All settings fields are required.'
+      )
+      setSuccessMessage('')
+      return
+    }
+
+    try {
+      setError('')
+      setSuccessMessage('')
+
+      const response = await fetch(
+        'http://localhost:8080/settings',
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type':
+              'application/json',
+          },
+          body: JSON.stringify(nextSettings),
+        }
       )
 
-    setProjectionSettings(nextSettings)
-    setSettingsForm(nextSettings)
-    persistProjectorSettings(nextSettings)
-    setBackgroundType('preset')
-    setBackgroundVariant(
-      nextSettings.defaultBackgroundVariant
-    )
-    setError('')
+      if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
+        throw new Error(
+          message ||
+            'Could not save settings.'
+        )
+      }
+
+      const savedSettings =
+        createSettingsForm(
+          await response.json()
+        )
+
+      setAppSettings(savedSettings)
+      setSettingsForm(savedSettings)
+      setSuccessMessage(
+        'Settings saved successfully.'
+      )
+    } catch (err) {
+      setError(
+        err.message ||
+          'Could not save settings.'
+      )
+      setSuccessMessage('')
+    }
   }
 
   async function downloadDatabaseBackup() {
@@ -2370,6 +2596,7 @@ function App() {
       return
     }
 
+    loadSettings()
     loadSongs()
     loadPlaylists()
     loadServicePlans()
@@ -2602,15 +2829,71 @@ function App() {
   ])
 
   useEffect(() => {
-    if (readStoredProjectorState()) {
+    const storedProjectorState =
+      readStoredProjectorState()
+
+    if (
+      hasRestorableProjectorSession(
+        storedProjectorState
+      )
+    ) {
       return
     }
 
     setBackgroundType('preset')
     setBackgroundVariant(
-      projectionSettings.defaultBackgroundVariant
+      appSettings.defaultBackground
     )
-  }, [projectionSettings.defaultBackgroundVariant])
+    setCustomBackgroundId(null)
+    setCustomBackgroundName('')
+  }, [appSettings.defaultBackground])
+
+  async function loadSettings() {
+    try {
+      const response = await fetch(
+        'http://localhost:8080/settings'
+      )
+
+      if (!response.ok) {
+        throw new Error(
+          'Failed to load settings'
+        )
+      }
+
+      const data = await response.json()
+      const normalizedSettings =
+        createSettingsForm(data)
+
+      setAppSettings(normalizedSettings)
+      setSettingsForm(normalizedSettings)
+    } catch (err) {
+      setAppSettings(
+        normalizeAppSettings(
+          DEFAULT_APP_SETTINGS
+        )
+      )
+      setSettingsForm(
+        createSettingsForm(
+          DEFAULT_APP_SETTINGS
+        )
+      )
+
+      if (
+        err instanceof TypeError &&
+        err.message === 'Failed to fetch'
+      ) {
+        setError(
+          'Could not load settings. Using built-in defaults.'
+        )
+        return
+      }
+
+      setError(
+        err.message ||
+          'Could not load settings. Using built-in defaults.'
+      )
+    }
+  }
 
   async function loadSongs() {
     try {
@@ -3239,6 +3522,27 @@ function App() {
         familyVersionsByFamilyId,
       ]
     )
+  const selectedSongFamilyDisplayName =
+    useMemo(() => {
+      const cachedFamilyName =
+        familyVersionsByFamilyId[
+          selectedSongFamilyId
+        ]?.displayName?.trim()
+
+      if (cachedFamilyName) {
+        return cachedFamilyName
+      }
+
+      return getSongFamilyDisplayName(
+        selectedSongLanguageVersions,
+        selectedSongResolved
+      )
+    }, [
+      familyVersionsByFamilyId,
+      selectedSongFamilyId,
+      selectedSongLanguageVersions,
+      selectedSongResolved,
+    ])
   const selectedSongSections = useMemo(
     () =>
       parseLyricsSections(
@@ -3271,6 +3575,110 @@ function App() {
     selectedSongSections.every(
       (section) => section.sectionsConfirmed
     )
+  const selectedSongAvailableFamilyLanguages =
+    useMemo(
+      () =>
+        SUPPORTED_SONG_LANGUAGES.filter(
+          (language) =>
+            Boolean(
+              selectedSongLanguageVersions[
+                language
+              ]
+            )
+        ),
+      [selectedSongLanguageVersions]
+    )
+  const selectedSongMissingFamilyLanguages =
+    useMemo(
+      () =>
+        SUPPORTED_SONG_LANGUAGES.filter(
+          (language) =>
+            !selectedSongLanguageVersions[
+              language
+            ]
+        ),
+      [selectedSongLanguageVersions]
+    )
+  const linkExistingSongCandidates =
+    useMemo(() => {
+      if (
+        !selectedSongFamilyId ||
+        !showLinkExistingSongModal
+      ) {
+        return []
+      }
+
+      const searchValue =
+        linkExistingSongForm.search
+          .trim()
+          .toLowerCase()
+      const targetLanguage =
+        linkExistingSongForm.language
+
+      return songs
+        .filter((song) => {
+          const canonicalLanguage =
+            normalizeLanguage(
+              song.language
+            )
+
+          if (
+            canonicalLanguage !==
+            targetLanguage
+          ) {
+            return false
+          }
+
+          if (
+            song.familyId ===
+            selectedSongFamilyId
+          ) {
+            return false
+          }
+
+          if (!searchValue) {
+            return true
+          }
+
+          const haystack = [
+            song.title,
+            song.author,
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+
+          return haystack.includes(
+            searchValue
+          )
+        })
+        .sort((left, right) => {
+          const leftStandalone =
+            getValidSongFamilyId(left) == null
+          const rightStandalone =
+            getValidSongFamilyId(right) ==
+            null
+
+          if (
+            leftStandalone !==
+            rightStandalone
+          ) {
+            return leftStandalone ? -1 : 1
+          }
+
+          return (
+            left.title || ''
+          ).localeCompare(
+            right.title || ''
+          )
+        })
+    }, [
+      linkExistingSongForm.language,
+      linkExistingSongForm.search,
+      selectedSongFamilyId,
+      showLinkExistingSongModal,
+      songs,
+    ])
 
   useEffect(() => {
     setSavedPlaylistMetadataForm(
@@ -3517,6 +3925,17 @@ function App() {
     }))
   }
 
+  function handleLinkExistingSongChange(
+    event
+  ) {
+    const { name, value } = event.target
+
+    setLinkExistingSongForm((current) => ({
+      ...current,
+      [name]: value,
+    }))
+  }
+
   function closeNewSongModal() {
     setShowNewSongModal(false)
     setNewSong(createBlankSongForm())
@@ -3540,6 +3959,81 @@ function App() {
     setAddTranslationForm(
       createAddTranslationForm()
     )
+  }
+
+  function closeLinkExistingSongModal() {
+    setShowLinkExistingSongModal(false)
+    setLinkExistingSongTargetFamilyId(null)
+    setLinkExistingSongForm(
+      createLinkExistingSongForm()
+    )
+  }
+
+  function syncFamilyVersionsState(
+    familyVersionsResponse
+  ) {
+    const familyId =
+      familyVersionsResponse?.familyId
+
+    if (!familyId) {
+      return
+    }
+
+    setFamilyVersionsByFamilyId(
+      (current) => ({
+        ...current,
+        [familyId]: familyVersionsResponse,
+      })
+    )
+    setFamilyVersionsErrorByFamilyId(
+      (current) => ({
+        ...current,
+        [familyId]: '',
+      })
+    )
+    setFamilyVersionsLoadingByFamilyId(
+      (current) => ({
+        ...current,
+        [familyId]: false,
+      })
+    )
+  }
+
+  function syncSongsAfterFamilyUpdate(
+    updatedSongs,
+    targetSelectedSongId = null
+  ) {
+    setSongs((current) =>
+      mergeSongsById(current, updatedSongs)
+    )
+
+    if (targetSelectedSongId != null) {
+      const nextSelectedSong =
+        updatedSongs.find(
+          (song) =>
+            song?.id === targetSelectedSongId
+        ) || null
+
+      if (nextSelectedSong) {
+        setSelectedSong(nextSelectedSong)
+      }
+
+      if (
+        currentSong?.id ===
+        targetSelectedSongId &&
+        nextSelectedSong
+      ) {
+        setCurrentSong(nextSelectedSong)
+      }
+
+      if (
+        projectionSong?.id ===
+          targetSelectedSongId &&
+        nextSelectedSong
+      ) {
+        setProjectionSong(nextSelectedSong)
+      }
+    }
   }
 
   async function createSong() {
@@ -3583,7 +4077,7 @@ function App() {
   }
 
   function openEditSongModal(
-    song = selectedSong
+    song = selectedSongResolved
   ) {
     const resolvedSong =
       songs.find(
@@ -3695,6 +4189,213 @@ function App() {
       )
     )
     setShowAddTranslationModal(true)
+  }
+
+  function openLinkedFamilySong(
+    song
+  ) {
+    const resolvedSong =
+      songs.find(
+        (candidate) =>
+          candidate.id === song?.id
+      ) || song
+
+    if (!resolvedSong) {
+      return
+    }
+
+    setSelectedSong(resolvedSong)
+    setPendingSongsScrollId(
+      resolvedSong.id
+    )
+  }
+
+  function openLinkExistingSongModal() {
+    if (!selectedSongFamilyId) {
+      return
+    }
+
+    setLinkExistingSongTargetFamilyId(
+      selectedSongFamilyId
+    )
+    setLinkExistingSongForm(
+      createLinkExistingSongForm(
+        selectedSongMissingFamilyLanguages[0] ||
+          selectedSongAvailableFamilyLanguages[0] ||
+          'ENGLISH'
+      )
+    )
+    setShowLinkExistingSongModal(true)
+  }
+
+  async function createOrManageSongFamily() {
+    if (!selectedSongResolved?.id) {
+      return
+    }
+
+    try {
+      setError('')
+
+      const response = await fetch(
+        `http://localhost:8080/song-families/from-song/${selectedSongResolved.id}`,
+        {
+          method: 'POST',
+        }
+      )
+
+      if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
+        throw new Error(
+          message ||
+            'Failed to create song family'
+        )
+      }
+
+      const familyVersions =
+        await response.json()
+      const updatedSongs = Object.values(
+        familyVersions?.versions || {}
+      ).filter(Boolean)
+
+      syncFamilyVersionsState(
+        familyVersions
+      )
+      syncSongsAfterFamilyUpdate(
+        updatedSongs,
+        selectedSongResolved.id
+      )
+      setSuccessMessage(
+        'Song Family is ready to manage.'
+      )
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function linkExistingSongToFamily(
+    song
+  ) {
+    if (
+      !linkExistingSongTargetFamilyId ||
+      !song?.id
+    ) {
+      return
+    }
+
+    try {
+      setError('')
+
+      const response = await fetch(
+        `http://localhost:8080/song-families/${linkExistingSongTargetFamilyId}/songs/${song.id}`,
+        {
+          method: 'POST',
+        }
+      )
+
+      if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
+        throw new Error(
+          message ||
+            'Failed to link song to family'
+        )
+      }
+
+      const familyVersions =
+        await response.json()
+      const updatedSongs = Object.values(
+        familyVersions?.versions || {}
+      ).filter(Boolean)
+      const selectedSongId =
+        selectedSongResolved?.id ?? null
+
+      syncFamilyVersionsState(
+        familyVersions
+      )
+      syncSongsAfterFamilyUpdate(
+        updatedSongs,
+        selectedSongId
+      )
+      setSuccessMessage(
+        `"${song.title}" linked to the Song Family.`
+      )
+      closeLinkExistingSongModal()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function unlinkSongFromFamily(
+    song
+  ) {
+    const familyId =
+      getValidSongFamilyId(song)
+
+    if (!familyId || !song?.id) {
+      return
+    }
+
+    const shouldUnlink = window.confirm(
+      `Unlink "${song.title}" from this Song Family?\n\nThe song will remain in the Song Library as a standalone ${getLanguageLabel(song.language)} song.`
+    )
+
+    if (!shouldUnlink) {
+      return
+    }
+
+    try {
+      setError('')
+
+      const response = await fetch(
+        `http://localhost:8080/song-families/${familyId}/songs/${song.id}`,
+        {
+          method: 'DELETE',
+        }
+      )
+
+      if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
+        throw new Error(
+          message ||
+            'Failed to unlink song from family'
+        )
+      }
+
+      const familyVersions =
+        await response.json()
+      const updatedStandaloneSong = {
+        ...song,
+        familyId: null,
+      }
+      const updatedSongs = [
+        ...Object.values(
+          familyVersions?.versions || {}
+        ),
+        updatedStandaloneSong,
+      ].filter(Boolean)
+      const selectedSongId =
+        selectedSongResolved?.id === song.id
+          ? song.id
+          : selectedSongResolved?.id ?? null
+
+      syncFamilyVersionsState(
+        familyVersions
+      )
+      syncSongsAfterFamilyUpdate(
+        updatedSongs,
+        selectedSongId
+      )
+      setSuccessMessage(
+        `"${song.title}" is now a standalone song.`
+      )
+    } catch (err) {
+      setError(err.message)
+    }
   }
 
   async function updateSong() {
@@ -3811,6 +4512,9 @@ function App() {
         setProjectionSong(updatedSong)
       }
 
+      setSuccessMessage(
+        `Updated "${updatedSong.title}".`
+      )
       closeEditSongModal()
     } catch (err) {
       setError(err.message)
@@ -4802,10 +5506,7 @@ function App() {
         setSelectedPlaylist(nextPlaylist)
       }
 
-      setCurrentSong(null)
-      setProjectionSong(null)
-      setCurrentSongSourceId(null)
-      setSectionIndex(0)
+      initializeFreshSessionDefaults()
       setSuccessMessage(
         `Completed "${completedService.serviceName}" and saved it to Service History.`
       )
@@ -4911,6 +5612,7 @@ function App() {
         reusedServicePlan.id
       )
       setSelectedPlaylist(null)
+      initializeFreshSessionDefaults()
       setReusedServiceSourceById(
         (current) => ({
           ...current,
@@ -4947,7 +5649,10 @@ function App() {
     setSavedPlaylistCreationMode('NEW')
     setSavedPlaylistSourceId('')
     setSavedPlaylistForm(
-      createSavedPlaylistForm()
+      createSavedPlaylistForm(
+        {},
+        appSettings.defaultServiceType
+      )
     )
     setShowSavedPlaylistModal(true)
   }
@@ -4967,7 +5672,7 @@ function App() {
     setSavedPlaylistForm(
       createSavedPlaylistForm({
         theme: sourcePlaylist?.theme || '',
-      })
+      }, appSettings.defaultServiceType)
     )
     setShowSavedPlaylistModal(true)
   }
@@ -5243,11 +5948,7 @@ function App() {
     )
     setSelectedPlaylist(playlistToActivate)
     setLoadedServicePlanId(null)
-    setSelectedSong(null)
-    setCurrentSong(null)
-    setCurrentSongSourceId(null)
-    setProjectionSong(null)
-    setSectionIndex(0)
+    initializeFreshSessionDefaults()
     setActiveView('operator')
     setSuccessMessage(
       `Made playlist "${playlistToActivate.name}" active in the Worship Console.`
@@ -5444,6 +6145,7 @@ function App() {
           null
       )
       setLoadedServicePlanId(null)
+      initializeFreshSessionDefaults()
       setShowUseForTodayModal(false)
       setUseForTodaySourcePlaylistId(null)
       setSuccessMessage(
@@ -5710,12 +6412,23 @@ function App() {
         (candidate) =>
           candidate.id === song.id
       ) || song
+    const nextSong =
+      shouldApplySessionDefaults(
+        currentSongSourceId
+      )
+        ? resolvePreferredLanguageSong(
+            resolvedSong,
+            appSettings.defaultLanguage,
+            songs,
+            familyVersionsByFamilyId
+          )
+        : resolvedSong
 
     setCurrentSongLanguageNotice('')
-    setSelectedSong(resolvedSong)
-    setCurrentSong(resolvedSong)
-    setCurrentSongSourceId(resolvedSong.id)
-    setProjectionSong(resolvedSong)
+    setSelectedSong(nextSong)
+    setCurrentSong(nextSong)
+    setCurrentSongSourceId(nextSong.id)
+    setProjectionSong(nextSong)
     setSectionIndex(0)
     setProjectionMode('LIVE')
   }
@@ -5997,17 +6710,13 @@ function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-logo">
-            HMGA
+            {appSettings.churchAbbreviation}
           </div>
 
           <div className="brand-copy">
             <h1>
-              Humility & Mercy
+              {appSettings.churchName}
             </h1>
-
-            <p>
-              Gospel Assembly
-            </p>
           </div>
         </div>
 
@@ -7351,16 +8060,29 @@ function App() {
                                 : 'No saved section structure'}
                         </p>
 
-                        <button
-                          type="button"
-                          className="button button-secondary button-compact"
-                          onClick={() =>
-                            openEditSectionsModal()
-                          }
-                          disabled={!selectedSong}
-                        >
-                          Edit Sections
-                        </button>
+                        <div className="section-status-actions">
+                          <button
+                            type="button"
+                            className="button button-secondary button-compact"
+                            onClick={() =>
+                              openEditSongModal()
+                            }
+                            disabled={!selectedSong}
+                          >
+                            Edit Song
+                          </button>
+
+                          <button
+                            type="button"
+                            className="button button-secondary button-compact"
+                            onClick={() =>
+                              openEditSectionsModal()
+                            }
+                            disabled={!selectedSong}
+                          >
+                            Edit Sections
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -7377,17 +8099,17 @@ function App() {
                     <div className="translation-availability-card">
                       <div className="translation-availability-header">
                         <strong>
-                          Translation Availability
+                          Song Family
                         </strong>
 
                         {selectedSongFamilyId ? (
                           <span>
-                            Family{' '}
-                            {selectedSongFamilyId}
+                            {selectedSongFamilyDisplayName}{' '}
+                            Family
                           </span>
                         ) : (
                           <span>
-                            Standalone song
+                            No family assigned
                           </span>
                         )}
                       </div>
@@ -7405,62 +8127,130 @@ function App() {
                           </div>
                         )}
 
-                      <div className="translation-availability-list">
-                        {SUPPORTED_SONG_LANGUAGES.map(
-                          (language) => {
-                            const languageSong =
-                              selectedSongLanguageVersions[
-                                language
-                              ]
-                            const isActive =
-                              normalizeLanguage(
-                                selectedSongResolved.language
-                              ) === language
-                            const isAvailable =
-                              Boolean(
-                                languageSong
-                              )
+                      {!selectedSongFamilyId ? (
+                        <div className="translation-availability-empty">
+                          <p>
+                            This song is currently
+                            standalone.
+                          </p>
 
-                            return (
-                              <div
-                                key={`translation-availability-${language}`}
-                                className="translation-availability-row"
-                              >
-                                <div className="translation-availability-copy">
-                                  <strong>
-                                    {getLanguageLabel(
-                                      language
-                                    )}
-                                  </strong>
+                          <button
+                            type="button"
+                            className="button button-secondary button-compact"
+                            onClick={
+                              createOrManageSongFamily
+                            }
+                          >
+                            Create / Manage Family
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="translation-availability-list">
+                            {SUPPORTED_SONG_LANGUAGES.map(
+                              (language) => {
+                                const languageSong =
+                                  selectedSongLanguageVersions[
+                                    language
+                                  ]
+                                const isActive =
+                                  normalizeLanguage(
+                                    selectedSongResolved.language
+                                  ) ===
+                                  language
+                                const isAvailable =
+                                  Boolean(
+                                    languageSong
+                                  )
 
-                                  <span>
-                                    {isActive
-                                      ? 'Active'
-                                      : isAvailable
-                                        ? 'Available'
-                                        : 'Missing'}
-                                  </span>
-                                </div>
-
-                                {!isAvailable && (
-                                  <button
-                                    type="button"
-                                    className="text-button"
-                                    onClick={() =>
-                                      openAddTranslationModal(
-                                        language,
-                                        selectedSongResolved
-                                      )
-                                    }
+                                return (
+                                  <div
+                                    key={`translation-availability-${language}`}
+                                    className="translation-availability-row translation-availability-row-family"
                                   >
-                                    Add Translation
-                                  </button>
-                                )}
-                              </div>
-                            )
-                          }
-                        )}
-                      </div>
+                                    <div className="translation-availability-copy">
+                                      <strong>
+                                        {getLanguageLabel(
+                                          language
+                                        )}
+                                      </strong>
+
+                                      <span>
+                                        {isAvailable
+                                          ? languageSong.title
+                                          : 'Missing'}
+                                      </span>
+
+                                      <small>
+                                        {isActive
+                                          ? 'Active'
+                                          : isAvailable
+                                            ? 'Available'
+                                            : 'Missing'}
+                                      </small>
+                                    </div>
+
+                                    <div className="translation-availability-actions">
+                                      {isAvailable ? (
+                                        <>
+                                          <button
+                                            type="button"
+                                            className="text-button"
+                                            onClick={() =>
+                                              openLinkedFamilySong(
+                                                languageSong
+                                              )
+                                            }
+                                          >
+                                            Open
+                                          </button>
+
+                                          <button
+                                            type="button"
+                                            className="text-button text-button-danger"
+                                            onClick={() =>
+                                              unlinkSongFromFamily(
+                                                languageSong
+                                              )
+                                            }
+                                          >
+                                            Unlink
+                                          </button>
+                                        </>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          className="text-button"
+                                          onClick={() =>
+                                            openAddTranslationModal(
+                                              language,
+                                              selectedSongResolved
+                                            )
+                                          }
+                                        >
+                                          Add Translation
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                )
+                              }
+                            )}
+                          </div>
+
+                          <div className="translation-availability-footer">
+                            <button
+                              type="button"
+                              className="button button-secondary button-compact"
+                              onClick={
+                                openLinkExistingSongModal
+                              }
+                            >
+                              Link Existing Song
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
 
                     <div className="song-lyrics-preview">
@@ -7469,16 +8259,6 @@ function App() {
                     </div>
 
                     <div className="detail-actions">
-                      <button
-                        className="button button-secondary"
-                        onClick={() =>
-                          openEditSongModal()
-                        }
-                        disabled={!selectedSong}
-                      >
-                        Edit Song
-                      </button>
-
                       <button
                         className="button button-danger"
                         onClick={
@@ -7497,13 +8277,6 @@ function App() {
                     </div>
 
                     <div className="detail-actions">
-                      <button
-                        className="button button-secondary"
-                        disabled
-                      >
-                        Edit Song
-                      </button>
-
                       <button
                         className="button button-danger"
                         disabled
@@ -8418,16 +9191,15 @@ function App() {
             <header className="service-header">
               <div>
                 <p className="page-kicker">
-                  Application Preferences
+                  Application Settings
                 </p>
 
                 <h2>Settings</h2>
 
                 <p className="header-description">
-                  Set the default projection
-                  look while keeping manual
-                  service controls available in
-                  the Worship Console.
+                  Manage your church profile
+                  and the defaults used when a
+                  new worship session starts.
                 </p>
               </div>
 
@@ -8448,26 +9220,98 @@ function App() {
                 <div className="card-header">
                   <div>
                     <p className="card-kicker">
-                      Projection Settings
+                      Church Profile
                     </p>
 
-                    <h3>
-                      Default Projection
-                    </h3>
+                    <h3>Identity</h3>
                   </div>
                 </div>
 
                 <div className="settings-form">
                   <label className="settings-field">
                     <span className="settings-label">
-                      Default projector
-                      background
+                      Church Name
+                    </span>
+
+                    <input
+                      name="churchName"
+                      value={
+                        settingsForm.churchName
+                      }
+                      onChange={
+                        handleSettingsChange
+                      }
+                      type="text"
+                    />
+                  </label>
+
+                  <label className="settings-field">
+                    <span className="settings-label">
+                      Church Abbreviation
+                    </span>
+
+                    <input
+                      name="churchAbbreviation"
+                      value={
+                        settingsForm.churchAbbreviation
+                      }
+                      onChange={
+                        handleSettingsChange
+                      }
+                      type="text"
+                    />
+                  </label>
+                </div>
+              </section>
+
+              <section className="console-card">
+                <div className="card-header">
+                  <div>
+                    <p className="card-kicker">
+                      Projection Defaults
+                    </p>
+
+                    <h3>Future Sessions</h3>
+                  </div>
+                </div>
+
+                <div className="settings-form">
+                  <label className="settings-field">
+                    <span className="settings-label">
+                      Default Language
                     </span>
 
                     <select
-                      name="defaultBackgroundVariant"
+                      name="defaultLanguage"
                       value={
-                        settingsForm.defaultBackgroundVariant
+                        settingsForm.defaultLanguage
+                      }
+                      onChange={
+                        handleSettingsChange
+                      }
+                    >
+                      {SONG_LANGUAGE_OPTIONS.map(
+                        (option) => (
+                          <option
+                            key={option.value}
+                            value={option.value}
+                          >
+                            {option.label}
+                          </option>
+                        )
+                      )}
+                    </select>
+                  </label>
+
+                  <label className="settings-field">
+                    <span className="settings-label">
+                      Default Background
+                    </span>
+
+                    <select
+                      name="defaultBackground"
+                      value={
+                        settingsForm.defaultBackground
                       }
                       onChange={
                         handleSettingsChange
@@ -8486,202 +9330,54 @@ function App() {
                     </select>
                   </label>
 
-                  <div className="settings-field">
+                  <label className="settings-field">
                     <span className="settings-label">
-                      Background preview
+                      Default Service Type
                     </span>
 
-                    <div className="settings-background-list">
-                      {BACKGROUND_OPTIONS.map(
+                    <select
+                      name="defaultServiceType"
+                      value={
+                        settingsForm.defaultServiceType
+                      }
+                      onChange={
+                        handleSettingsChange
+                      }
+                    >
+                      {PLAYLIST_SERVICE_TYPE_OPTIONS.map(
                         (option) => (
-                          <label
-                            key={option.id}
-                            className={[
-                              'settings-background-option',
-                              settingsForm.defaultBackgroundVariant ===
-                              option.id
-                                ? 'active'
-                                : '',
-                            ]
-                              .filter(Boolean)
-                              .join(' ')}
+                          <option
+                            key={option}
+                            value={option}
                           >
-                            <input
-                              type="radio"
-                              name="defaultBackgroundVariant"
-                              value={option.id}
-                              checked={
-                                settingsForm.defaultBackgroundVariant ===
-                                option.id
-                              }
-                              onChange={
-                                handleSettingsChange
-                              }
-                            />
-
-                            <span
-                              className={
-                                option.swatchClassName
-                              }
-                            />
-
-                            <span className="settings-background-copy">
-                              {option.name}
-                            </span>
-                          </label>
+                            {option}
+                          </option>
                         )
                       )}
-                    </div>
-                  </div>
-
-                  <label className="settings-checkbox">
-                    <input
-                      type="checkbox"
-                      name="showSongTitle"
-                      checked={
-                        settingsForm.showSongTitle
-                      }
-                      onChange={
-                        handleSettingsChange
-                      }
-                    />
-
-                    <span>
-                      Show song title at the
-                      bottom of the projection
-                    </span>
-                  </label>
-
-                  <label className="settings-field">
-                    <span className="settings-label">
-                      Default lyrics alignment
-                    </span>
-
-                    <select
-                      name="lyricsAlignment"
-                      value={
-                        settingsForm.lyricsAlignment
-                      }
-                      onChange={
-                        handleSettingsChange
-                      }
-                    >
-                      <option value="left">
-                        Left
-                      </option>
-                      <option value="center">
-                        Center
-                      </option>
-                      <option value="right">
-                        Right
-                      </option>
-                    </select>
-                  </label>
-
-                  <label className="settings-field">
-                    <span className="settings-label">
-                      Lyrics size preference
-                    </span>
-
-                    <select
-                      name="lyricsSizePreference"
-                      value={
-                        settingsForm.lyricsSizePreference
-                      }
-                      onChange={
-                        handleSettingsChange
-                      }
-                    >
-                      <option value="AUTO_FIT">
-                        Auto Fit
-                      </option>
-                      <option value="SMALL">
-                        Small
-                      </option>
-                      <option value="MEDIUM">
-                        Medium
-                      </option>
-                      <option value="LARGE">
-                        Large
-                      </option>
                     </select>
                   </label>
 
                   <p className="settings-note">
-                    Saving applies these
-                    projection preferences to
-                    the dashboard preview and
-                    projector window. During a
-                    service, the Worship Console
-                    background buttons can still
-                    temporarily override the
-                    default background.
+                    These values are used as
+                    safe starting defaults for
+                    future sessions. Operators
+                    can still change language,
+                    background, and service type
+                    during live use.
                   </p>
 
                   <div className="settings-actions">
                     <button
                       className="button button-primary"
                       onClick={
-                        saveProjectionSettings
+                        saveApplicationSettings
                       }
                       type="button"
                     >
                       Save Settings
                     </button>
-
-                    <button
-                      className="button button-secondary"
-                      onClick={
-                        restoreDefaultProjectionSettings
-                      }
-                      type="button"
-                    >
-                      Restore Defaults
-                    </button>
                   </div>
                 </div>
-              </section>
-
-              <section className="console-card">
-                <div className="card-header">
-                  <div>
-                    <p className="card-kicker">
-                      Live Preview
-                    </p>
-
-                    <h3>
-                      Current Projection
-                    </h3>
-                  </div>
-
-                  <span className="number-pill">
-                    {projectionMode}
-                  </span>
-                </div>
-
-                <p className="settings-preview-copy">
-                  This preview reflects the
-                  saved projection settings
-                  together with the current
-                  song, section, and projection
-                  mode.
-                </p>
-
-                <ProjectorDisplay
-                  song={previewSong}
-                  sectionIndex={sectionIndex}
-                  projectionMode={projectionMode}
-                  backgroundType={backgroundType}
-                  backgroundVariant={
-                    backgroundVariant
-                  }
-                  customBackgroundUrl={
-                    customBackgroundUrl
-                  }
-                  projectionSettings={
-                    projectionSettings
-                  }
-                />
               </section>
             </div>
           </>
@@ -9532,7 +10228,7 @@ Second line`}
             <div className="modal-heading">
               <div>
                 <p className="card-kicker">
-                  Song Library
+                  Song Administration
                 </p>
 
                 <h2>
@@ -9546,7 +10242,14 @@ Second line`}
               >
                 ×
               </button>
-            </div>
+              </div>
+
+            <p className="settings-preview-copy">
+              Update the selected song without
+              creating a new record. The song ID
+              and existing family/playlists stay
+              the same.
+            </p>
 
             <label>
               Title
@@ -9797,6 +10500,203 @@ Second line`}
                 onClick={createTranslation}
               >
                 Save Translation
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showLinkExistingSongModal && (
+        <div className="modal-overlay">
+          <div className="modal modal-wide">
+            <div className="modal-heading">
+              <div>
+                <p className="card-kicker">
+                  Song Family
+                </p>
+
+                <h2>
+                  Link Existing Song
+                </h2>
+              </div>
+
+              <button
+                className="modal-close"
+                onClick={
+                  closeLinkExistingSongModal
+                }
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="translation-editor-grid">
+              <section className="translation-source-panel">
+                <p className="translation-panel-kicker">
+                  TARGET FAMILY
+                </p>
+
+                <div className="translation-source-block">
+                  <span>Family</span>
+                  <strong>
+                    {
+                      selectedSongFamilyDisplayName
+                    }{' '}
+                    Family
+                  </strong>
+                </div>
+
+                <div className="translation-source-block">
+                  <span>
+                    Current versions
+                  </span>
+                  <div className="song-family-language-summary">
+                    {SUPPORTED_SONG_LANGUAGES.map(
+                      (language) => (
+                        <div
+                          key={`song-family-language-summary-${language}`}
+                          className="song-family-language-pill"
+                        >
+                          <strong>
+                            {getLanguageLabel(
+                              language
+                            )}
+                          </strong>
+                          <span>
+                            {selectedSongLanguageVersions[
+                              language
+                            ]
+                              ? 'Available'
+                              : 'Missing'}
+                          </span>
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              <section className="translation-form-panel">
+                <label>
+                  Language
+
+                  <select
+                    name="language"
+                    value={
+                      linkExistingSongForm.language
+                    }
+                    onChange={
+                      handleLinkExistingSongChange
+                    }
+                  >
+                    {SUPPORTED_SONG_LANGUAGES.map(
+                      (language) => (
+                        <option
+                          key={`link-language-${language}`}
+                          value={language}
+                        >
+                          {getLanguageLabel(
+                            language
+                          )}
+                        </option>
+                      )
+                    )}
+                  </select>
+                </label>
+
+                <label>
+                  Search Existing Songs
+
+                  <input
+                    name="search"
+                    value={
+                      linkExistingSongForm.search
+                    }
+                    onChange={
+                      handleLinkExistingSongChange
+                    }
+                    placeholder="Search by title or author"
+                  />
+                </label>
+
+                <div className="link-existing-song-results">
+                  {linkExistingSongCandidates.map(
+                    (song) => {
+                      const songFamilyId =
+                        getValidSongFamilyId(
+                          song
+                        )
+                      const canLink =
+                        songFamilyId == null
+
+                      return (
+                        <div
+                          key={`link-existing-song-${song.id}`}
+                          className="link-existing-song-row"
+                        >
+                          <div className="translation-availability-copy">
+                            <strong>
+                              {song.title}
+                            </strong>
+
+                            <span>
+                              {getLanguageLabel(
+                                song.language
+                              )}
+                            </span>
+
+                            <small>
+                              {songFamilyId
+                                ? `Already in Family ${songFamilyId}`
+                                : 'Standalone'}
+                            </small>
+                          </div>
+
+                          <button
+                            type="button"
+                            className="button button-secondary button-compact"
+                            disabled={!canLink}
+                            title={
+                              canLink
+                                ? ''
+                                : 'This song already belongs to another Song Family.'
+                            }
+                            onClick={() =>
+                              linkExistingSongToFamily(
+                                song
+                              )
+                            }
+                          >
+                            Link
+                          </button>
+                        </div>
+                      )
+                    }
+                  )}
+
+                  {linkExistingSongCandidates.length ===
+                    0 && (
+                    <div className="empty-state">
+                      No matching songs found
+                      for{' '}
+                      {getLanguageLabel(
+                        linkExistingSongForm.language
+                      )}
+                      .
+                    </div>
+                  )}
+                </div>
+              </section>
+            </div>
+
+            <div className="modal-buttons">
+              <button
+                className="button button-secondary"
+                onClick={
+                  closeLinkExistingSongModal
+                }
+              >
+                Cancel
               </button>
             </div>
           </div>
