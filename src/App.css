@@ -427,6 +427,102 @@ button:disabled {
   font-weight: 800;
 }
 
+/* BIBLE */
+
+.bible-grid {
+  display: grid;
+  grid-template-columns:
+    minmax(280px, 0.9fr)
+    minmax(360px, 1.1fr);
+  gap: 18px;
+  align-items: start;
+  min-height: 0;
+}
+
+.bible-selection-card,
+.bible-preview-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.bible-form-grid {
+  display: grid;
+  grid-template-columns:
+    repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.bible-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bible-form-field span {
+  color: #5d6a80;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.bible-form-field select {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0 14px;
+  background: #ffffff;
+  color: var(--text);
+}
+
+.bible-selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.bible-preview-reference {
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+
+.bible-preview-verses {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #e3eaf3;
+  border-radius: 16px;
+  background: #f8fbff;
+  padding: 18px;
+}
+
+.bible-preview-verse {
+  margin: 0;
+  color: #30405c;
+  line-height: 1.65;
+}
+
+.bible-preview-verse + .bible-preview-verse {
+  margin-top: 14px;
+}
+
+.bible-live-note {
+  margin-top: 14px;
+}
+
+.screen-reference {
+  margin-bottom: 18px;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 /* SEARCH */
 
 .search-wrapper {
@@ -2584,6 +2680,10 @@ button:disabled {
 /* RESPONSIVE */
 
 @media (max-width: 1280px) {
+  .bible-grid {
+    grid-template-columns: 1fr;
+  }
+
   .sidebar {
     width: 250px;
     flex-basis: 250px;
@@ -2645,6 +2745,10 @@ button:disabled {
 }
 
 @media (max-width: 1120px) {
+  .bible-form-grid {
+    grid-template-columns: 1fr;
+  }
+
   .console-grid {
     grid-template-columns:
       minmax(0, 1fr)

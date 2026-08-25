@@ -106,6 +106,18 @@ const SONG_LANGUAGE_OPTIONS = [
   },
 ]
 
+const DEFAULT_BIBLE_SELECTION = {
+  bookKey: 'JOHN',
+  chapter: 3,
+  startVerse: 16,
+  endVerse: 18,
+}
+
+const PROJECTION_CONTENT_TYPES = {
+  SONG: 'SONG',
+  BIBLE: 'BIBLE',
+}
+
 function normalizeLanguage(value) {
   const normalized = String(value ?? '')
     .trim()
@@ -139,6 +151,129 @@ function normalizeLanguage(value) {
     default:
       return normalized
   }
+}
+
+function clampNumber(
+  value,
+  minimum,
+  maximum,
+  fallback
+) {
+  const numericValue = Number(value)
+
+  if (!Number.isInteger(numericValue)) {
+    return fallback
+  }
+
+  return Math.min(
+    maximum,
+    Math.max(minimum, numericValue)
+  )
+}
+
+function findBibleBook(
+  bibleBooks,
+  bookKey
+) {
+  return (
+    bibleBooks.find(
+      (book) => book.key === bookKey
+    ) || null
+  )
+}
+
+function normalizeBibleSelection(
+  selection,
+  bibleBooks
+) {
+  if (
+    !Array.isArray(bibleBooks) ||
+    bibleBooks.length === 0
+  ) {
+    return {
+      ...DEFAULT_BIBLE_SELECTION,
+    }
+  }
+
+  const selectedBook =
+    findBibleBook(
+      bibleBooks,
+      selection?.bookKey
+    ) ||
+    findBibleBook(
+      bibleBooks,
+      DEFAULT_BIBLE_SELECTION.bookKey
+    ) ||
+    bibleBooks[0]
+  const chapterCount = Math.max(
+    selectedBook?.chapterCount || 0,
+    1
+  )
+  const chapter = clampNumber(
+    selection?.chapter,
+    1,
+    chapterCount,
+    clampNumber(
+      DEFAULT_BIBLE_SELECTION.chapter,
+      1,
+      chapterCount,
+      1
+    )
+  )
+
+  return {
+    bookKey: selectedBook.key,
+    chapter,
+    startVerse:
+      Number(selection?.startVerse) ||
+      DEFAULT_BIBLE_SELECTION.startVerse,
+    endVerse:
+      Number(selection?.endVerse) ||
+      DEFAULT_BIBLE_SELECTION.endVerse,
+  }
+}
+
+function getContiguousBibleEndVerseOptions(
+  availableVerseNumbers,
+  startVerse
+) {
+  if (
+    !Array.isArray(availableVerseNumbers) ||
+    availableVerseNumbers.length === 0
+  ) {
+    return []
+  }
+
+  const startIndex =
+    availableVerseNumbers.indexOf(startVerse)
+
+  if (startIndex < 0) {
+    return availableVerseNumbers
+  }
+
+  const endOptions = []
+
+  for (
+    let index = startIndex;
+    index < availableVerseNumbers.length;
+    index += 1
+  ) {
+    const verseNumber =
+      availableVerseNumbers[index]
+
+    if (index > startIndex) {
+      const previousVerse =
+        availableVerseNumbers[index - 1]
+
+      if (verseNumber !== previousVerse + 1) {
+        break
+      }
+    }
+
+    endOptions.push(verseNumber)
+  }
+
+  return endOptions
 }
 
 const PLAYLIST_SERVICE_TYPE_OPTIONS = [
@@ -783,7 +918,10 @@ function shouldApplySessionDefaults(
 function hasRestorableProjectorSession(
   projectorState
 ) {
-  return Boolean(projectorState?.projectionSong)
+  return Boolean(
+    projectorState?.projectionSong ||
+      projectorState?.projectedBiblePassage
+  )
 }
 
 function getValidSongFamilyId(song) {
@@ -1231,6 +1369,9 @@ function normalizeProjectionSettings(
 function createProjectorState({
   song,
   sectionIndex,
+  projectionContentType = PROJECTION_CONTENT_TYPES.SONG,
+  biblePassage = null,
+  bibleVerseIndex = 0,
   projectionMode,
   backgroundType = DEFAULT_BACKGROUND_TYPE,
   backgroundVariant = DEFAULT_BACKGROUND_VARIANT,
@@ -1241,6 +1382,11 @@ function createProjectorState({
   return {
     projectionSong: song || null,
     sectionIndex,
+    projectionContentType,
+    projectedBiblePassage:
+      biblePassage || null,
+    projectedBibleVerseIndex:
+      bibleVerseIndex,
     projectionMode,
     backgroundType,
     backgroundVariant,
@@ -1825,6 +1971,9 @@ function AutoFitLyrics({
 function ProjectorDisplay({
   song,
   sectionIndex,
+  projectionContentType = PROJECTION_CONTENT_TYPES.SONG,
+  biblePassage = null,
+  bibleVerseIndex = 0,
   projectionMode,
   backgroundType = DEFAULT_BACKGROUND_TYPE,
   backgroundVariant = DEFAULT_BACKGROUND_VARIANT,
@@ -1839,15 +1988,25 @@ function ProjectorDisplay({
     )
 
   const sections = useMemo(() => {
-    if (!song) {
+    if (
+      !song ||
+      projectionContentType !==
+        PROJECTION_CONTENT_TYPES.SONG
+    ) {
       return []
     }
 
     return parseLyricsSections(song)
-  }, [song])
+  }, [projectionContentType, song])
 
   const currentSection =
     sections[sectionIndex] || sections[0]
+  const currentBibleVerse =
+    biblePassage?.verses?.[
+      bibleVerseIndex
+    ] ||
+    biblePassage?.verses?.[0] ||
+    null
   const normalizedProjectionSettings =
     normalizeProjectionSettings(
       projectionSettings
@@ -1983,6 +2142,8 @@ function ProjectorDisplay({
           style={customBackgroundStyle}
         >
           {projectionMode === 'LIVE' &&
+            projectionContentType ===
+              PROJECTION_CONTENT_TYPES.SONG &&
             song && (
               <div className="screen-content">
                 <AutoFitLyrics
@@ -2019,6 +2180,45 @@ function ProjectorDisplay({
                     {song.title}
                   </div>
                 )}
+              </div>
+            )}
+
+          {projectionMode === 'LIVE' &&
+            projectionContentType ===
+              PROJECTION_CONTENT_TYPES.BIBLE &&
+            biblePassage &&
+            currentBibleVerse && (
+              <div className="screen-content">
+                <div className="screen-reference">
+                  {biblePassage.reference}
+                </div>
+
+                <AutoFitLyrics
+                  text={`${currentBibleVerse.verseNumber} ${currentBibleVerse.text}`}
+                  maxFontSize={
+                    lyricsSizing.maxFontSize
+                  }
+                  minFontSize={
+                    lyricsSizing.minFontSize
+                  }
+                  containerClassName={
+                    showFullscreenControl
+                      ? 'lyrics-fit-container-projector'
+                      : ''
+                  }
+                  textClassName={
+                    showFullscreenControl
+                      ? 'screen-lyrics-projector'
+                      : ''
+                  }
+                  textAlign={
+                    normalizedProjectionSettings.lyricsAlignment
+                  }
+                />
+
+                <div className="screen-title">
+                  {biblePassage.translationName}
+                </div>
               </div>
             )}
         </div>
@@ -2108,6 +2308,39 @@ function App() {
     projectionSong,
     setProjectionSong,
   ] = useState(null)
+  const [
+    projectionContentType,
+    setProjectionContentType,
+  ] = useState(() => {
+    const storedState = readStoredProjectorState()
+
+    return (
+      storedState?.projectionContentType ||
+      PROJECTION_CONTENT_TYPES.SONG
+    )
+  })
+  const [
+    projectedBiblePassage,
+    setProjectedBiblePassage,
+  ] = useState(() => {
+    const storedState = readStoredProjectorState()
+
+    return (
+      storedState?.projectedBiblePassage ||
+      null
+    )
+  })
+  const [
+    projectedBibleVerseIndex,
+    setProjectedBibleVerseIndex,
+  ] = useState(() => {
+    const storedState = readStoredProjectorState()
+
+    return (
+      storedState?.projectedBibleVerseIndex ||
+      0
+    )
+  })
 
   const [sectionIndex, setSectionIndex] =
     useState(0)
@@ -2196,9 +2429,23 @@ function App() {
   const [error, setError] = useState('')
   const [successMessage, setSuccessMessage] =
     useState('')
+  const [bibleBooks, setBibleBooks] = useState([])
+  const [
+    selectedBibleChapterMetadata,
+    setSelectedBibleChapterMetadata,
+  ] = useState(null)
+  const [
+    bibleSelection,
+    setBibleSelection,
+  ] = useState(DEFAULT_BIBLE_SELECTION)
+  const [
+    previewBiblePassage,
+    setPreviewBiblePassage,
+  ] = useState(null)
   const projectorChannelRef = useRef(null)
   const projectorWindowRef = useRef(null)
   const backgroundInputRef = useRef(null)
+  const lastSongProjectionRef = useRef(null)
   const previousVisibleModeRef = useRef('LIVE')
   const latestProjectorStateRef = useRef(
     createProjectorState({
@@ -2227,6 +2474,15 @@ function App() {
         storedState?.projectionSong || null,
       sectionIndex:
         storedState?.sectionIndex || 0,
+      projectionContentType:
+        storedState?.projectionContentType ||
+        PROJECTION_CONTENT_TYPES.SONG,
+      projectedBiblePassage:
+        storedState?.projectedBiblePassage ||
+        null,
+      projectedBibleVerseIndex:
+        storedState?.projectedBibleVerseIndex ||
+        0,
       projectionMode:
         storedState?.projectionMode || 'CLEAR',
       backgroundType:
@@ -2597,6 +2853,7 @@ function App() {
     }
 
     loadSettings()
+    loadBibleBooks()
     loadSongs()
     loadPlaylists()
     loadServicePlans()
@@ -2666,6 +2923,15 @@ function App() {
         projectionSong:
           state.projectionSong || null,
         sectionIndex: state.sectionIndex || 0,
+        projectionContentType:
+          state.projectionContentType ||
+          PROJECTION_CONTENT_TYPES.SONG,
+        projectedBiblePassage:
+          state.projectedBiblePassage ||
+          null,
+        projectedBibleVerseIndex:
+          state.projectedBibleVerseIndex ||
+          0,
         projectionMode:
           state.projectionMode || 'CLEAR',
         backgroundType:
@@ -2893,6 +3159,357 @@ function App() {
           'Could not load settings. Using built-in defaults.'
       )
     }
+  }
+
+  async function loadBibleBooks() {
+    try {
+      const response = await fetch(
+        'http://localhost:8080/bible/books'
+      )
+
+      if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
+        throw new Error(
+          message ||
+            'Could not load Bible metadata.'
+        )
+      }
+
+      const data = await response.json()
+
+      if (!Array.isArray(data)) {
+        throw new Error(
+          'Received invalid Bible metadata.'
+        )
+      }
+
+      setBibleBooks(data)
+      setBibleSelection((current) =>
+        normalizeBibleSelection(
+          current,
+          data
+        )
+      )
+    } catch (err) {
+      if (
+        err instanceof TypeError &&
+        err.message === 'Failed to fetch'
+      ) {
+        setError(
+          'Could not load Bible metadata. Restart the church-song-api server and try again.'
+        )
+        return
+      }
+
+      setError(
+        err.message ||
+          'Could not load Bible metadata.'
+      )
+    }
+  }
+
+  async function loadBibleChapterMetadata(
+    {
+      bookKey,
+      chapter,
+    } = bibleSelection
+  ) {
+    if (!bookKey || !chapter) {
+      setSelectedBibleChapterMetadata(null)
+      return
+    }
+
+    try {
+      const response = await fetch(
+        `http://localhost:8080/bible/books/${bookKey}/chapters/${chapter}/metadata`
+      )
+
+      if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
+        throw new Error(
+          message ||
+            'Could not load Bible chapter metadata.'
+        )
+      }
+
+      const data = await response.json()
+      const availableVerseNumbers =
+        Array.isArray(
+          data.availableVerseNumbers
+        )
+          ? data.availableVerseNumbers
+          : []
+
+      setSelectedBibleChapterMetadata({
+        ...data,
+        availableVerseNumbers,
+      })
+      setBibleSelection((current) => {
+        const firstVerse =
+          availableVerseNumbers[0] || 1
+        const nextStartVerse =
+          availableVerseNumbers.includes(
+            current.startVerse
+          )
+            ? current.startVerse
+            : firstVerse
+        const contiguousEndVerseOptions =
+          getContiguousBibleEndVerseOptions(
+            availableVerseNumbers,
+            nextStartVerse
+          )
+        const nextEndVerse =
+          contiguousEndVerseOptions.includes(
+            current.endVerse
+          )
+            ? current.endVerse
+            : contiguousEndVerseOptions[0] ||
+              nextStartVerse
+
+        return {
+          ...current,
+          startVerse: nextStartVerse,
+          endVerse: nextEndVerse,
+        }
+      })
+    } catch (err) {
+      setSelectedBibleChapterMetadata(null)
+
+      if (
+        err instanceof TypeError &&
+        err.message === 'Failed to fetch'
+      ) {
+        setError(
+          'Could not load Bible chapter metadata. Restart the church-song-api server and try again.'
+        )
+        return
+      }
+
+      setError(
+        err.message ||
+          'Could not load Bible chapter metadata.'
+      )
+    }
+  }
+
+  function handleBibleBookChange(event) {
+    const nextBookKey = event.target.value
+
+    setPreviewBiblePassage(null)
+    setBibleSelection((current) =>
+      normalizeBibleSelection(
+        {
+          ...current,
+          bookKey: nextBookKey,
+          chapter: 1,
+          startVerse: 1,
+          endVerse: 1,
+        },
+        bibleBooks
+      )
+    )
+  }
+
+  function handleBibleChapterChange(event) {
+    const nextChapter = Number(
+      event.target.value
+    )
+
+    setPreviewBiblePassage(null)
+    setBibleSelection((current) =>
+      normalizeBibleSelection(
+        {
+          ...current,
+          chapter: nextChapter,
+          startVerse: 1,
+          endVerse: 1,
+        },
+        bibleBooks
+      )
+    )
+  }
+
+  function handleBibleStartVerseChange(event) {
+    const nextStartVerse = Number(
+      event.target.value
+    )
+
+    setPreviewBiblePassage(null)
+    setBibleSelection((current) =>
+      normalizeBibleSelection(
+        {
+          ...current,
+          startVerse: nextStartVerse,
+          endVerse: Math.max(
+            nextStartVerse,
+            Number(current.endVerse) || 1
+          ),
+        },
+        bibleBooks
+      )
+    )
+  }
+
+  function handleBibleEndVerseChange(event) {
+    const nextEndVerse = Number(
+      event.target.value
+    )
+
+    setPreviewBiblePassage(null)
+    setBibleSelection((current) =>
+      normalizeBibleSelection(
+        {
+          ...current,
+          endVerse: nextEndVerse,
+        },
+        bibleBooks
+      )
+    )
+  }
+
+  async function previewBiblePassageSelection() {
+    if (!selectedBibleBook) {
+      return
+    }
+
+    try {
+      setError('')
+
+      const query = new URLSearchParams({
+        book: bibleSelection.bookKey,
+        chapter: String(
+          bibleSelection.chapter
+        ),
+        startVerse: String(
+          bibleSelection.startVerse
+        ),
+        endVerse: String(
+          bibleSelection.endVerse
+        ),
+      })
+      const response = await fetch(
+        `http://localhost:8080/bible/passage?${query.toString()}`
+      )
+
+      if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
+        throw new Error(
+          message ||
+            'Could not preview Bible passage.'
+        )
+      }
+
+      const data = await response.json()
+      setPreviewBiblePassage(data)
+    } catch (err) {
+      if (
+        err instanceof TypeError &&
+        err.message === 'Failed to fetch'
+      ) {
+        setError(
+          'Could not preview Bible passage. Restart the church-song-api server and try again.'
+        )
+        return
+      }
+
+      setError(
+        err.message ||
+          'Could not preview Bible passage.'
+      )
+    }
+  }
+
+  function projectBiblePassage() {
+    if (
+      !previewBiblePassage ||
+      !previewBiblePassage.verses?.length
+    ) {
+      return
+    }
+
+    if (
+      projectionContentType ===
+      PROJECTION_CONTENT_TYPES.SONG
+    ) {
+      lastSongProjectionRef.current = {
+        song:
+          previewSong ||
+          currentSongResolved ||
+          null,
+        sectionIndex,
+      }
+    } else if (
+      lastSongProjectionRef.current == null &&
+      currentSongResolved
+    ) {
+      lastSongProjectionRef.current = {
+        song: currentSongResolved,
+        sectionIndex,
+      }
+    }
+
+    setProjectionContentType(
+      PROJECTION_CONTENT_TYPES.BIBLE
+    )
+    setProjectedBiblePassage(
+      previewBiblePassage
+    )
+    setProjectedBibleVerseIndex(0)
+    setProjectionMode('LIVE')
+  }
+
+  function returnToSongProjection() {
+    const snapshot =
+      lastSongProjectionRef.current
+
+    if (snapshot?.song) {
+      const resolvedSong =
+        songs.find(
+          (candidate) =>
+            candidate.id ===
+            snapshot.song.id
+        ) || snapshot.song
+
+      setProjectionContentType(
+        PROJECTION_CONTENT_TYPES.SONG
+      )
+      setProjectedBiblePassage(null)
+      setProjectedBibleVerseIndex(0)
+      setProjectionSong(resolvedSong)
+      setSectionIndex(
+        snapshot.sectionIndex || 0
+      )
+      setProjectionMode('LIVE')
+      lastSongProjectionRef.current = null
+      return
+    }
+
+    if (currentSongResolved) {
+      setProjectionContentType(
+        PROJECTION_CONTENT_TYPES.SONG
+      )
+      setProjectedBiblePassage(null)
+      setProjectedBibleVerseIndex(0)
+      setProjectionSong(currentSongResolved)
+      setSectionIndex(0)
+      setProjectionMode('LIVE')
+      return
+    }
+
+    setProjectionContentType(
+      PROJECTION_CONTENT_TYPES.SONG
+    )
+    setProjectedBiblePassage(null)
+    setProjectedBibleVerseIndex(0)
+    setProjectionSong(null)
+    setSectionIndex(0)
+    setProjectionMode('CLEAR')
   }
 
   async function loadSongs() {
@@ -3392,6 +4009,51 @@ function App() {
       : 'Service Playlist'
   const completableServiceTarget =
     getCompletableServiceTarget()
+  const selectedBibleBook = useMemo(
+    () =>
+      findBibleBook(
+        bibleBooks,
+        bibleSelection.bookKey
+      ),
+    [bibleBooks, bibleSelection.bookKey]
+  )
+  const selectedBibleChapterOptions =
+    useMemo(() => {
+      const chapterCount = Math.max(
+        selectedBibleBook?.chapterCount || 0,
+        0
+      )
+
+      return Array.from(
+        { length: chapterCount },
+        (_, index) => index + 1
+      )
+    }, [selectedBibleBook])
+  const selectedBibleVerseOptions =
+    selectedBibleChapterMetadata
+      ?.availableVerseNumbers || []
+  const selectedBibleContiguousEndVerseOptions =
+    useMemo(
+      () =>
+        getContiguousBibleEndVerseOptions(
+          selectedBibleVerseOptions,
+          bibleSelection.startVerse
+        ),
+      [
+        selectedBibleVerseOptions,
+        bibleSelection.startVerse,
+      ]
+    )
+  const selectedBibleVerseCount =
+    selectedBibleVerseOptions.length
+  const isBibleProjectionActive =
+    projectionContentType ===
+      PROJECTION_CONTENT_TYPES.BIBLE &&
+    projectedBiblePassage?.verses?.length > 0
+  const previewProjectionContentType =
+    isBibleProjectionActive
+      ? PROJECTION_CONTENT_TYPES.BIBLE
+      : PROJECTION_CONTENT_TYPES.SONG
 
   const selectedSongPlaylistCount =
     selectedSong == null
@@ -3483,8 +4145,19 @@ function App() {
   }
 
   const previewSong =
-    projectionSongResolved ||
-    currentSongResolved
+    previewProjectionContentType ===
+    PROJECTION_CONTENT_TYPES.SONG
+      ? projectionSongResolved ||
+        currentSongResolved
+      : null
+  const currentBibleVerse =
+    isBibleProjectionActive
+      ? projectedBiblePassage.verses[
+          projectedBibleVerseIndex
+        ] ||
+        projectedBiblePassage.verses[0] ||
+        null
+      : null
   const previewSections = useMemo(() => {
     if (!previewSong) {
       return []
@@ -3496,10 +4169,19 @@ function App() {
     previewSections[sectionIndex] ||
     previewSections[0]
   const canGoToPreviousProjection =
-    sectionIndex > 0
+    previewProjectionContentType ===
+    PROJECTION_CONTENT_TYPES.BIBLE
+      ? projectedBibleVerseIndex > 0
+      : sectionIndex > 0
   const canGoToNextProjection =
-    sectionIndex <
-      previewSections.length - 1
+    previewProjectionContentType ===
+    PROJECTION_CONTENT_TYPES.BIBLE
+      ? projectedBibleVerseIndex <
+        (projectedBiblePassage?.verses
+          ?.length || 0) -
+          1
+      : sectionIndex <
+        previewSections.length - 1
   const currentSongSelectionId =
     currentSongSourceId ??
     currentSongResolved?.id ??
@@ -3859,6 +4541,24 @@ function App() {
   ])
 
   useEffect(() => {
+    if (!selectedBibleBook) {
+      setSelectedBibleChapterMetadata(
+        null
+      )
+      return
+    }
+
+    loadBibleChapterMetadata({
+      bookKey: bibleSelection.bookKey,
+      chapter: bibleSelection.chapter,
+    })
+  }, [
+    bibleSelection.bookKey,
+    bibleSelection.chapter,
+    selectedBibleBook,
+  ])
+
+  useEffect(() => {
     if (isProjectorWindow) {
       return
     }
@@ -3867,6 +4567,11 @@ function App() {
       createProjectorState({
         song: previewSong,
         sectionIndex,
+        projectionContentType,
+        biblePassage:
+          projectedBiblePassage,
+        bibleVerseIndex:
+          projectedBibleVerseIndex,
         projectionMode,
         backgroundType,
         backgroundVariant,
@@ -3890,8 +4595,11 @@ function App() {
     backgroundVariant,
     customBackgroundId,
     customBackgroundName,
+    projectionContentType,
     projectionSettings,
     projectionMode,
+    projectedBiblePassage,
+    projectedBibleVerseIndex,
     previewSong,
     sectionIndex,
   ])
@@ -6397,6 +7105,11 @@ function App() {
 
     setCurrentSongLanguageNotice('')
     setCurrentSong(song)
+    setProjectionContentType(
+      PROJECTION_CONTENT_TYPES.SONG
+    )
+    setProjectedBiblePassage(null)
+    setProjectedBibleVerseIndex(0)
     setProjectionSong(song)
     setSectionIndex(0)
     setProjectionMode('LIVE')
@@ -6428,6 +7141,11 @@ function App() {
     setSelectedSong(nextSong)
     setCurrentSong(nextSong)
     setCurrentSongSourceId(nextSong.id)
+    setProjectionContentType(
+      PROJECTION_CONTENT_TYPES.SONG
+    )
+    setProjectedBiblePassage(null)
+    setProjectedBibleVerseIndex(0)
     setProjectionSong(nextSong)
     setSectionIndex(0)
     setProjectionMode('LIVE')
@@ -6469,6 +7187,11 @@ function App() {
     setCurrentSongSourceId(
       resolvedSong.id
     )
+    setProjectionContentType(
+      PROJECTION_CONTENT_TYPES.SONG
+    )
+    setProjectedBiblePassage(null)
+    setProjectedBibleVerseIndex(0)
     setProjectionSong(resolvedSong)
     setSectionIndex(nextSectionIndex)
   }
@@ -6512,6 +7235,24 @@ function App() {
   }
 
   function previousSection() {
+    if (
+      previewProjectionContentType ===
+      PROJECTION_CONTENT_TYPES.BIBLE
+    ) {
+      if (projectedBibleVerseIndex > 0) {
+        setProjectedBibleVerseIndex(
+          (current) => current - 1
+        )
+        setProjectionMode((currentMode) =>
+          getNavigationProjectionMode(
+            currentMode
+          )
+        )
+      }
+
+      return
+    }
+
     if (sectionIndex > 0) {
       setSectionIndex(
         (current) => current - 1
@@ -6527,6 +7268,29 @@ function App() {
   }
 
   function nextSection() {
+    if (
+      previewProjectionContentType ===
+      PROJECTION_CONTENT_TYPES.BIBLE
+    ) {
+      if (
+        projectedBibleVerseIndex <
+        (projectedBiblePassage?.verses
+          ?.length || 0) -
+          1
+      ) {
+        setProjectedBibleVerseIndex(
+          (current) => current + 1
+        )
+        setProjectionMode((currentMode) =>
+          getNavigationProjectionMode(
+            currentMode
+          )
+        )
+      }
+
+      return
+    }
+
     if (
       sectionIndex <
       previewSections.length - 1
@@ -6553,6 +7317,11 @@ function App() {
       createProjectorState({
         song: previewSong,
         sectionIndex,
+        projectionContentType,
+        biblePassage:
+          projectedBiblePassage,
+        bibleVerseIndex:
+          projectedBibleVerseIndex,
         projectionMode,
         backgroundType,
         backgroundVariant,
@@ -6685,6 +7454,15 @@ function App() {
         sectionIndex={
           projectorWindowState.sectionIndex
         }
+        projectionContentType={
+          projectorWindowState.projectionContentType
+        }
+        biblePassage={
+          projectorWindowState.projectedBiblePassage
+        }
+        bibleVerseIndex={
+          projectorWindowState.projectedBibleVerseIndex
+        }
         projectionMode={
           projectorWindowState.projectionMode
         }
@@ -6751,6 +7529,23 @@ function App() {
             </span>
 
             Songs
+          </button>
+
+          <button
+            className={
+              activeView === 'bible'
+                ? 'side-link active'
+                : 'side-link'
+            }
+            onClick={() =>
+              setActiveView('bible')
+            }
+          >
+            <span className="nav-icon">
+              📖
+            </span>
+
+            Bible
           </button>
 
           <button
@@ -7524,11 +8319,22 @@ function App() {
                                   key={`${section.name}-${index}`}
                                   className={
                                     sectionIndex ===
-                                    index
+                                      index &&
+                                    previewProjectionContentType ===
+                                      PROJECTION_CONTENT_TYPES.SONG
                                       ? 'section-pill active'
                                       : 'section-pill'
                                   }
                                   onClick={() => {
+                                    setProjectionContentType(
+                                      PROJECTION_CONTENT_TYPES.SONG
+                                    )
+                                    setProjectedBiblePassage(
+                                      null
+                                    )
+                                    setProjectedBibleVerseIndex(
+                                      0
+                                    )
                                     setProjectionSong(
                                       currentSong
                                     )
@@ -7568,13 +8374,32 @@ function App() {
                     </p>
 
                     <strong>
-                      {currentSection?.name ||
-                        'Ready'}
+                      {previewProjectionContentType ===
+                      PROJECTION_CONTENT_TYPES.BIBLE
+                        ? currentBibleVerse
+                          ? `${projectedBiblePassage.reference} · Verse ${currentBibleVerse.verseNumber}`
+                          : projectedBiblePassage?.reference ||
+                            'Bible Passage'
+                        : currentSection?.name ||
+                          'Ready'}
                     </strong>
                   </div>
 
                   <div className="preview-header-actions">
-                    {currentSong && (
+                    {previewProjectionContentType ===
+                    PROJECTION_CONTENT_TYPES.BIBLE ? (
+                      <div className="current-actions">
+                        <button
+                          className="button button-secondary"
+                          onClick={
+                            returnToSongProjection
+                          }
+                        >
+                          Return to Song
+                        </button>
+                      </div>
+                    ) : (
+                      currentSong && (
                       <div className="current-actions">
                         <button
                           className="button button-secondary"
@@ -7599,6 +8424,7 @@ function App() {
                           Send to Projector
                         </button>
                       </div>
+                      )
                     )}
 
                     <div className="live-indicator">
@@ -7612,6 +8438,15 @@ function App() {
                 <ProjectorDisplay
                   song={previewSong}
                   sectionIndex={sectionIndex}
+                  projectionContentType={
+                    previewProjectionContentType
+                  }
+                  biblePassage={
+                    projectedBiblePassage
+                  }
+                  bibleVerseIndex={
+                    projectedBibleVerseIndex
+                  }
                   projectionMode={projectionMode}
                   backgroundType={backgroundType}
                   backgroundVariant={
@@ -7744,7 +8579,10 @@ function App() {
                       !canGoToPreviousProjection
                     }
                   >
-                    ← Previous
+                    {previewProjectionContentType ===
+                    PROJECTION_CONTENT_TYPES.BIBLE
+                      ? '← Previous Verse'
+                      : '← Previous'}
                   </button>
 
                   <button
@@ -7793,13 +8631,304 @@ function App() {
                       !canGoToNextProjection
                     }
                   >
-                    Next →
+                    {previewProjectionContentType ===
+                    PROJECTION_CONTENT_TYPES.BIBLE
+                      ? 'Next Verse →'
+                      : 'Next →'}
                   </button>
                 </div>
 
                 <p className="projection-shortcuts-hint">
                   Shortcuts: `←` previous, `→` or `Space` next, `B` black, `C` clear lyrics.
                 </p>
+              </section>
+            </div>
+          </div>
+        )}
+
+        {activeView === 'bible' && (
+          <div className="admin-view">
+            <header className="service-header">
+              <div>
+                <p className="page-kicker">
+                  Bible Projection
+                </p>
+
+                <h2>Bible</h2>
+
+                <p className="header-description">
+                  Select a passage, preview it,
+                  and send it to the projector
+                  without interrupting the
+                  current service plan.
+                </p>
+              </div>
+
+              <div className="header-right">
+                <button
+                  className="button button-secondary"
+                  onClick={() =>
+                    setActiveView('operator')
+                  }
+                >
+                  Worship Console
+                </button>
+              </div>
+            </header>
+
+            <div className="bible-grid">
+              <section className="console-card bible-selection-card">
+                <div className="card-header">
+                  <div>
+                    <p className="card-kicker">
+                      Passage Selection
+                    </p>
+
+                    <h3>Select Reference</h3>
+                  </div>
+                </div>
+
+                <div className="bible-form-grid">
+                  <label className="bible-form-field">
+                    <span>Book</span>
+                    <select
+                      value={
+                        bibleSelection.bookKey
+                      }
+                      onChange={
+                        handleBibleBookChange
+                      }
+                      disabled={
+                        bibleBooks.length === 0
+                      }
+                    >
+                      {bibleBooks.map((book) => (
+                        <option
+                          key={book.key}
+                          value={book.key}
+                        >
+                          {book.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="bible-form-field">
+                    <span>Chapter</span>
+                    <select
+                      value={
+                        bibleSelection.chapter
+                      }
+                      onChange={
+                        handleBibleChapterChange
+                      }
+                      disabled={
+                        !selectedBibleBook
+                      }
+                    >
+                      {selectedBibleChapterOptions.map(
+                        (chapter) => (
+                          <option
+                            key={chapter}
+                            value={chapter}
+                          >
+                            {chapter}
+                          </option>
+                        )
+                      )}
+                    </select>
+                  </label>
+
+                  <label className="bible-form-field">
+                    <span>Start Verse</span>
+                    <select
+                      value={
+                        bibleSelection.startVerse
+                      }
+                      onChange={
+                        handleBibleStartVerseChange
+                      }
+                      disabled={
+                        selectedBibleVerseCount ===
+                        0
+                      }
+                    >
+                      {selectedBibleVerseOptions.map(
+                        (verse) => (
+                          <option
+                            key={verse}
+                            value={verse}
+                          >
+                            {verse}
+                          </option>
+                        )
+                      )}
+                    </select>
+                  </label>
+
+                  <label className="bible-form-field">
+                    <span>End Verse</span>
+                    <select
+                      value={
+                        bibleSelection.endVerse
+                      }
+                      onChange={
+                        handleBibleEndVerseChange
+                      }
+                      disabled={
+                        selectedBibleVerseCount ===
+                        0
+                      }
+                    >
+                      {selectedBibleContiguousEndVerseOptions.map(
+                        (verse) => (
+                          <option
+                            key={verse}
+                            value={verse}
+                          >
+                            {verse}
+                          </option>
+                        )
+                      )}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="bible-selection-actions">
+                  <button
+                    className="button button-primary"
+                    onClick={
+                      previewBiblePassageSelection
+                    }
+                    disabled={
+                      bibleBooks.length === 0
+                    }
+                  >
+                    Preview Passage
+                  </button>
+                </div>
+              </section>
+
+              <section className="console-card bible-preview-card">
+                <div className="card-header">
+                  <div>
+                    <p className="card-kicker">
+                      Passage Preview
+                    </p>
+
+                    <h3>
+                      {previewBiblePassage
+                        ?.reference ||
+                        'Choose a passage'}
+                    </h3>
+                  </div>
+
+                  {previewBiblePassage
+                    ?.translationCode && (
+                    <span className="number-pill">
+                      {
+                        previewBiblePassage.translationCode
+                      }
+                    </span>
+                  )}
+                </div>
+
+                {previewBiblePassage ? (
+                  <>
+                    <div className="bible-preview-reference">
+                      {previewBiblePassage.translationName}
+                    </div>
+
+                    <div className="bible-preview-verses">
+                      {previewBiblePassage.verses.map(
+                        (verse) => (
+                          <p
+                            key={`${previewBiblePassage.reference}-${verse.verseNumber}`}
+                            className="bible-preview-verse"
+                          >
+                            <strong>
+                              {
+                                verse.verseNumber
+                              }
+                            </strong>{' '}
+                            {verse.text}
+                          </p>
+                        )
+                      )}
+                    </div>
+
+                    <div className="bible-selection-actions">
+                      <button
+                        className="button button-primary"
+                        onClick={
+                          projectBiblePassage
+                        }
+                      >
+                        Send to Projector
+                      </button>
+
+                      {isBibleProjectionActive && (
+                        <>
+                          <button
+                            className="button button-secondary"
+                            onClick={
+                              previousSection
+                            }
+                            disabled={
+                              !canGoToPreviousProjection
+                            }
+                          >
+                            ← Previous Verse
+                          </button>
+
+                          <button
+                            className="button button-secondary"
+                            onClick={nextSection}
+                            disabled={
+                              !canGoToNextProjection
+                            }
+                          >
+                            Next Verse →
+                          </button>
+
+                          <button
+                            className="button button-secondary"
+                            onClick={
+                              returnToSongProjection
+                            }
+                          >
+                            Return to Song
+                          </button>
+                        </>
+                      )}
+                    </div>
+
+                    {isBibleProjectionActive &&
+                      currentBibleVerse && (
+                        <p className="inline-note bible-live-note">
+                          Projecting verse{' '}
+                          <strong>
+                            {
+                              currentBibleVerse.verseNumber
+                            }
+                          </strong>{' '}
+                          from{' '}
+                          <strong>
+                            {
+                              projectedBiblePassage.reference
+                            }
+                          </strong>
+                          .
+                        </p>
+                      )}
+                  </>
+                ) : (
+                  <div className="empty-state">
+                    Preview a Bible passage to
+                    review it before
+                    projection.
+                  </div>
+                )}
               </section>
             </div>
           </div>
