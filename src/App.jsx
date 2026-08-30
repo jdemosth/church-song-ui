@@ -113,6 +113,51 @@ const DEFAULT_BIBLE_SELECTION = {
   endVerse: 18,
 }
 
+const BIBLE_TRANSLATION_CODES = {
+  FRENCH: 'LSG1910',
+  ENGLISH: 'KJV',
+  SPANISH: 'RV1909',
+}
+
+const BIBLE_REFERENCE_TRANSLATION_ORDER = [
+  BIBLE_TRANSLATION_CODES.FRENCH,
+  BIBLE_TRANSLATION_CODES.ENGLISH,
+  BIBLE_TRANSLATION_CODES.SPANISH,
+]
+
+const BIBLE_REFERENCE_TRANSLATION_LABELS = {
+  LSG1910: 'Français',
+  KJV: 'English',
+  RV1909: 'Español',
+}
+
+const BIBLE_PROJECTION_MODES = {
+  FRENCH: 'FRENCH',
+  ENGLISH: 'ENGLISH',
+  SPANISH: 'SPANISH',
+  FRENCH_ENGLISH: 'FRENCH_ENGLISH',
+}
+
+const BIBLE_PROJECTION_LANGUAGE_OPTIONS = [
+  {
+    value: BIBLE_PROJECTION_MODES.FRENCH,
+    label: 'Français',
+  },
+  {
+    value: BIBLE_PROJECTION_MODES.ENGLISH,
+    label: 'English',
+  },
+  {
+    value: BIBLE_PROJECTION_MODES.SPANISH,
+    label: 'Español',
+  },
+  {
+    value:
+      BIBLE_PROJECTION_MODES.FRENCH_ENGLISH,
+    label: 'Français + English',
+  },
+]
+
 const PROJECTION_CONTENT_TYPES = {
   SONG: 'SONG',
   BIBLE: 'BIBLE',
@@ -274,6 +319,428 @@ function getContiguousBibleEndVerseOptions(
   }
 
   return endOptions
+}
+
+function normalizeBibleProjectionMode(value) {
+  return BIBLE_PROJECTION_LANGUAGE_OPTIONS.some(
+    (option) => option.value === value
+  )
+    ? value
+    : BIBLE_PROJECTION_MODES.FRENCH_ENGLISH
+}
+
+function normalizeBibleReferenceTranslationCode(
+  value,
+  availableTranslations = []
+) {
+  const normalized = String(value ?? '')
+    .trim()
+    .toUpperCase()
+
+  const availableCodes =
+    availableTranslations.map(
+      (translation) => translation.code
+    )
+
+  if (
+    availableCodes.includes(normalized)
+  ) {
+    return normalized
+  }
+
+  for (const code of BIBLE_REFERENCE_TRANSLATION_ORDER) {
+    if (availableCodes.includes(code)) {
+      return code
+    }
+  }
+
+  return availableCodes[0] || ''
+}
+
+function getPreviewProjectionModeForTranslation(
+  translationCode
+) {
+  if (
+    translationCode ===
+    BIBLE_TRANSLATION_CODES.ENGLISH
+  ) {
+    return BIBLE_PROJECTION_MODES.ENGLISH
+  }
+
+  if (
+    translationCode ===
+    BIBLE_TRANSLATION_CODES.SPANISH
+  ) {
+    return BIBLE_PROJECTION_MODES.SPANISH
+  }
+
+  return BIBLE_PROJECTION_MODES.FRENCH
+}
+
+function getBibleReferenceTranslationLabel(
+  translation
+) {
+  if (!translation) {
+    return ''
+  }
+
+  return (
+    BIBLE_REFERENCE_TRANSLATION_LABELS[
+      translation.code
+    ] ||
+    translation.language ||
+    translation.name
+  )
+}
+
+function getBibleBookDisplayName(
+  bookKey,
+  fallbackName = ''
+) {
+  return fallbackName || bookKey
+}
+
+function buildBibleReference(
+  bookName,
+  chapter,
+  startVerse,
+  endVerse
+) {
+  if (!bookName) {
+    return ''
+  }
+
+  if (startVerse === endVerse) {
+    return `${bookName} ${chapter}:${startVerse}`
+  }
+
+  return `${bookName} ${chapter}:${startVerse}–${endVerse}`
+}
+
+function getBiblePassageReference(
+  passage
+) {
+  if (!passage) {
+    return ''
+  }
+
+  const bookName = getBibleBookDisplayName(
+    passage.bookKey,
+    passage.bookName
+  )
+
+  return buildBibleReference(
+    bookName,
+    passage.chapter,
+    passage.startVerse,
+    passage.endVerse
+  )
+}
+
+function getBibleVerseReference(
+  passage,
+  verseNumber
+) {
+  if (!passage || !verseNumber) {
+    return ''
+  }
+
+  const bookName = getBibleBookDisplayName(
+    passage.bookKey,
+    passage.bookName
+  )
+
+  return buildBibleReference(
+    bookName,
+    passage.chapter,
+    verseNumber,
+    verseNumber
+  )
+}
+
+function getLiveBibleReference(
+  biblePassage,
+  verseNumber
+) {
+  if (!biblePassage || !verseNumber) {
+    return ''
+  }
+
+  if (
+    biblePassage.projectionMode ===
+    BIBLE_PROJECTION_MODES.FRENCH_ENGLISH
+  ) {
+    const frenchBookName =
+      getBibleBookDisplayName(
+        biblePassage.translations?.FRENCH
+          ?.bookKey,
+        biblePassage.translations?.FRENCH
+          ?.bookName
+      )
+    const englishBookName =
+      getBibleBookDisplayName(
+        biblePassage.translations?.ENGLISH
+          ?.bookKey,
+        biblePassage.translations?.ENGLISH
+          ?.bookName
+      )
+
+    if (frenchBookName && englishBookName) {
+      return `${frenchBookName} / ${englishBookName} ${biblePassage.chapter}:${verseNumber}`
+    }
+  }
+
+  if (
+    biblePassage.projectionMode ===
+    BIBLE_PROJECTION_MODES.ENGLISH
+  ) {
+    return getBibleVerseReference(
+      biblePassage.translations?.ENGLISH ||
+        biblePassage,
+      verseNumber
+    )
+  }
+
+  if (
+    biblePassage.projectionMode ===
+    BIBLE_PROJECTION_MODES.SPANISH
+  ) {
+    return getBibleVerseReference(
+      biblePassage.translations?.SPANISH ||
+        biblePassage,
+      verseNumber
+    )
+  }
+
+  return getBibleVerseReference(
+    biblePassage.translations?.FRENCH ||
+      biblePassage,
+    verseNumber
+  )
+}
+
+function createBiblePreviewPassage({
+  mode,
+  frenchPassage,
+  englishPassage,
+  spanishPassage,
+}) {
+  const hasFrench =
+    frenchPassage?.verses?.length > 0
+  const hasEnglish =
+    englishPassage?.verses?.length > 0
+  const hasSpanish =
+    spanishPassage?.verses?.length > 0
+
+  if (
+    !hasFrench &&
+    !hasEnglish &&
+    !hasSpanish
+  ) {
+    return null
+  }
+
+  const effectiveMode =
+    mode === BIBLE_PROJECTION_MODES.ENGLISH
+      ? BIBLE_PROJECTION_MODES.ENGLISH
+      : mode ===
+            BIBLE_PROJECTION_MODES.SPANISH
+        ? BIBLE_PROJECTION_MODES.SPANISH
+      : mode === BIBLE_PROJECTION_MODES.FRENCH
+        ? BIBLE_PROJECTION_MODES.FRENCH
+        : BIBLE_PROJECTION_MODES.FRENCH_ENGLISH
+
+  const sourcePassage =
+    effectiveMode ===
+    BIBLE_PROJECTION_MODES.ENGLISH
+      ? englishPassage || frenchPassage
+      : effectiveMode ===
+            BIBLE_PROJECTION_MODES.SPANISH
+        ? spanishPassage ||
+          frenchPassage ||
+          englishPassage
+      : frenchPassage || englishPassage
+  const verseNumbers = (
+    sourcePassage?.verses || []
+  ).map((verse) => verse.verseNumber)
+
+  const englishVersesByNumber =
+    Object.fromEntries(
+      (englishPassage?.verses || []).map(
+        (verse) => [verse.verseNumber, verse]
+      )
+    )
+  const frenchVersesByNumber =
+    Object.fromEntries(
+      (frenchPassage?.verses || []).map(
+        (verse) => [verse.verseNumber, verse]
+      )
+    )
+  const spanishVersesByNumber =
+    Object.fromEntries(
+      (spanishPassage?.verses || []).map(
+        (verse) => [verse.verseNumber, verse]
+      )
+    )
+
+  const verses = verseNumbers.map(
+    (verseNumber) => {
+      const frenchVerse =
+        frenchVersesByNumber[verseNumber] ||
+        null
+      const englishVerse =
+        englishVersesByNumber[verseNumber] ||
+        null
+
+      if (
+        effectiveMode ===
+        BIBLE_PROJECTION_MODES.ENGLISH
+      ) {
+        return {
+          verseNumber,
+          text: englishVerse?.text || '',
+        }
+      }
+
+      if (
+        effectiveMode ===
+        BIBLE_PROJECTION_MODES.FRENCH
+      ) {
+        return {
+          verseNumber,
+          text: frenchVerse?.text || '',
+        }
+      }
+
+      if (
+        effectiveMode ===
+        BIBLE_PROJECTION_MODES.SPANISH
+      ) {
+        return {
+          verseNumber,
+          text:
+            spanishVersesByNumber[
+              verseNumber
+            ]?.text || '',
+        }
+      }
+
+      return {
+        verseNumber,
+        primaryText: frenchVerse?.text || '',
+        secondaryText:
+          englishVerse?.text || '',
+      }
+    }
+  )
+
+  const reference =
+    effectiveMode ===
+    BIBLE_PROJECTION_MODES.ENGLISH
+      ? getBiblePassageReference(
+          englishPassage || sourcePassage
+        )
+      : effectiveMode ===
+            BIBLE_PROJECTION_MODES.SPANISH
+        ? getBiblePassageReference(
+            spanishPassage ||
+              sourcePassage
+          )
+      : getBiblePassageReference(
+          frenchPassage || sourcePassage
+        )
+
+  return {
+    projectionMode: effectiveMode,
+    bookKey: sourcePassage.bookKey,
+    chapter: sourcePassage.chapter,
+    startVerse: sourcePassage.startVerse,
+    endVerse: sourcePassage.endVerse,
+    canonicalReference: buildBibleReference(
+      sourcePassage.bookKey,
+      sourcePassage.chapter,
+      sourcePassage.startVerse,
+      sourcePassage.endVerse
+    ),
+    reference,
+    translationCode:
+      effectiveMode ===
+      BIBLE_PROJECTION_MODES.FRENCH
+        ? BIBLE_TRANSLATION_CODES.FRENCH
+        : effectiveMode ===
+            BIBLE_PROJECTION_MODES.ENGLISH
+          ? BIBLE_TRANSLATION_CODES.ENGLISH
+          : effectiveMode ===
+                BIBLE_PROJECTION_MODES.SPANISH
+            ? BIBLE_TRANSLATION_CODES.SPANISH
+          : `${BIBLE_TRANSLATION_CODES.FRENCH}+${BIBLE_TRANSLATION_CODES.ENGLISH}`,
+    translationName:
+      effectiveMode ===
+      BIBLE_PROJECTION_MODES.FRENCH
+        ? 'Louis Segond 1910'
+        : effectiveMode ===
+            BIBLE_PROJECTION_MODES.ENGLISH
+          ? 'King James Version'
+          : effectiveMode ===
+                BIBLE_PROJECTION_MODES.SPANISH
+            ? 'Reina-Valera 1909'
+          : 'Louis Segond 1910 + King James Version',
+    translations: {
+      FRENCH: hasFrench
+        ? {
+            ...frenchPassage,
+            reference:
+              getBiblePassageReference(
+                frenchPassage
+              ),
+          }
+        : null,
+      ENGLISH: hasEnglish
+        ? {
+            ...englishPassage,
+            reference:
+              getBiblePassageReference(
+                englishPassage
+              ),
+          }
+        : null,
+      SPANISH: hasSpanish
+        ? {
+            ...spanishPassage,
+            reference:
+              getBiblePassageReference(
+                spanishPassage
+              ),
+          }
+        : null,
+    },
+    verses,
+  }
+}
+
+function getBibleProjectionText(
+  biblePassage,
+  verse
+) {
+  if (!biblePassage || !verse) {
+    return ''
+  }
+
+  if (
+    biblePassage.projectionMode ===
+    BIBLE_PROJECTION_MODES.FRENCH_ENGLISH
+  ) {
+    return [
+      String(verse.verseNumber),
+      verse.primaryText || '',
+      '',
+      verse.secondaryText || '',
+    ]
+      .join('\n')
+      .trim()
+  }
+
+  return `${verse.verseNumber} ${verse.text || ''}`.trim()
 }
 
 const PLAYLIST_SERVICE_TYPE_OPTIONS = [
@@ -465,6 +932,58 @@ function createSongFormFromSong(song) {
     sectionsConfirmed:
       song.sectionsConfirmed === true,
   }
+}
+
+function getMelodyReferenceAudioUrl(
+  melodyReference
+) {
+  const audioPath =
+    melodyReference?.audioUrl?.trim() || ''
+
+  if (!audioPath) {
+    return ''
+  }
+
+  return `http://localhost:8080${audioPath}`
+}
+
+function getMelodyReferenceSummary(
+  melodyReference
+) {
+  if (!melodyReference) {
+    return ''
+  }
+
+  if (
+    melodyReference.ownerType === 'SONG_FAMILY'
+  ) {
+    return 'Family melody reference · Kreyòl primary'
+  }
+
+  if (
+    melodyReference.resolutionType ===
+    'SONG_FALLBACK'
+  ) {
+    return 'Standalone melody reference preserved after family link'
+  }
+
+  return 'Standalone song melody reference'
+}
+
+function formatAudioTime(seconds) {
+  const safeSeconds = Math.max(
+    0,
+    Math.floor(Number(seconds) || 0)
+  )
+  const minutes = Math.floor(
+    safeSeconds / 60
+  )
+  const remainingSeconds =
+    safeSeconds % 60
+
+  return `${minutes}:${String(
+    remainingSeconds
+  ).padStart(2, '0')}`
 }
 
 function sortServicePlans(servicePlans) {
@@ -1937,7 +2456,12 @@ function AutoFitLyrics({
     return () => {
       resizeObserver.disconnect()
     }
-  }, [text])
+  }, [
+    maxFontSize,
+    minFontSize,
+    text,
+    textAlign,
+  ])
 
   return (
     <div
@@ -1963,6 +2487,355 @@ function AutoFitLyrics({
         }}
       >
         {text}
+      </div>
+    </div>
+  )
+}
+
+function AppScrollArea({
+  className = '',
+  viewportClassName = '',
+  scrollbarClassName = '',
+  children,
+  viewportRef = null,
+  dependencyKey = '',
+}) {
+  const localViewportRef = useRef(null)
+  const trackRef = useRef(null)
+  const dragRef = useRef({
+    startY: 0,
+    startScrollTop: 0,
+  })
+  const [metrics, setMetrics] = useState({
+    isScrollable: false,
+    thumbHeight: 0,
+    thumbOffset: 0,
+  })
+  const [isDragging, setIsDragging] =
+    useState(false)
+
+  function assignViewportRef(node) {
+    localViewportRef.current = node
+
+    if (typeof viewportRef === 'function') {
+      viewportRef(node)
+      return
+    }
+
+    if (
+      viewportRef &&
+      typeof viewportRef === 'object'
+    ) {
+      viewportRef.current = node
+    }
+  }
+
+  function updateMetrics() {
+    const scrollElement =
+      localViewportRef.current
+
+    if (!scrollElement) {
+      setMetrics({
+        isScrollable: false,
+        thumbHeight: 0,
+        thumbOffset: 0,
+      })
+      return
+    }
+
+    const { clientHeight, scrollHeight, scrollTop } =
+      scrollElement
+
+    if (
+      clientHeight <= 0 ||
+      scrollHeight <= clientHeight + 1
+    ) {
+      setMetrics({
+        isScrollable: false,
+        thumbHeight: 0,
+        thumbOffset: 0,
+      })
+      return
+    }
+
+    const thumbHeight = Math.max(
+      (clientHeight / scrollHeight) *
+        clientHeight,
+      40
+    )
+    const maxScrollTop = Math.max(
+      scrollHeight - clientHeight,
+      0
+    )
+    const maxThumbOffset = Math.max(
+      clientHeight - thumbHeight,
+      0
+    )
+    const thumbOffset =
+      maxScrollTop === 0
+        ? 0
+        : (scrollTop / maxScrollTop) *
+          maxThumbOffset
+
+    setMetrics({
+      isScrollable: true,
+      thumbHeight,
+      thumbOffset,
+    })
+  }
+
+  useLayoutEffect(() => {
+    const scrollElement =
+      localViewportRef.current
+
+    if (
+      !scrollElement ||
+      typeof window === 'undefined'
+    ) {
+      return
+    }
+
+    const handleMetricsChange = () => {
+      updateMetrics()
+    }
+
+    handleMetricsChange()
+    scrollElement.addEventListener(
+      'scroll',
+      handleMetricsChange
+    )
+    window.addEventListener(
+      'resize',
+      handleMetricsChange
+    )
+
+    let resizeObserver = null
+
+    if (
+      typeof ResizeObserver !==
+      'undefined'
+    ) {
+      resizeObserver =
+        new ResizeObserver(
+          handleMetricsChange
+        )
+      resizeObserver.observe(scrollElement)
+    }
+
+    return () => {
+      scrollElement.removeEventListener(
+        'scroll',
+        handleMetricsChange
+      )
+      window.removeEventListener(
+        'resize',
+        handleMetricsChange
+      )
+      resizeObserver?.disconnect()
+    }
+  }, [dependencyKey, children])
+
+  useEffect(() => {
+    if (
+      !isDragging ||
+      typeof window === 'undefined'
+    ) {
+      return
+    }
+
+    const handleMouseMove = (event) => {
+      const scrollElement =
+        localViewportRef.current
+
+      if (!scrollElement) {
+        return
+      }
+
+      const { startY, startScrollTop } =
+        dragRef.current
+      const {
+        clientHeight,
+        scrollHeight,
+      } = scrollElement
+      const maxScrollTop = Math.max(
+        scrollHeight - clientHeight,
+        0
+      )
+      const maxThumbOffset = Math.max(
+        clientHeight -
+          metrics.thumbHeight,
+        0
+      )
+
+      if (
+        maxScrollTop <= 0 ||
+        maxThumbOffset <= 0
+      ) {
+        return
+      }
+
+      scrollElement.scrollTop = Math.min(
+        maxScrollTop,
+        Math.max(
+          0,
+          startScrollTop +
+            ((event.clientY - startY) /
+              maxThumbOffset) *
+              maxScrollTop
+        )
+      )
+      updateMetrics()
+    }
+
+    const handleMouseUp = () => {
+      setIsDragging(false)
+    }
+
+    window.addEventListener(
+      'mousemove',
+      handleMouseMove
+    )
+    window.addEventListener(
+      'mouseup',
+      handleMouseUp
+    )
+
+    return () => {
+      window.removeEventListener(
+        'mousemove',
+        handleMouseMove
+      )
+      window.removeEventListener(
+        'mouseup',
+        handleMouseUp
+      )
+    }
+  }, [isDragging, metrics.thumbHeight])
+
+  function handleTrackMouseDown(event) {
+    const scrollElement =
+      localViewportRef.current
+    const trackElement = trackRef.current
+
+    if (
+      !scrollElement ||
+      !trackElement ||
+      !metrics.isScrollable
+    ) {
+      return
+    }
+
+    if (
+      event.target instanceof HTMLElement &&
+      event.target.closest(
+        '.app-scrollbar-thumb'
+      )
+    ) {
+      return
+    }
+
+    event.preventDefault()
+
+    const trackRect =
+      trackElement.getBoundingClientRect()
+    const clickOffset =
+      event.clientY - trackRect.top
+    const maxScrollTop = Math.max(
+      scrollElement.scrollHeight -
+        scrollElement.clientHeight,
+      0
+    )
+    const maxThumbOffset = Math.max(
+      trackRect.height - metrics.thumbHeight,
+      0
+    )
+    const nextThumbOffset = Math.min(
+      maxThumbOffset,
+      Math.max(
+        0,
+        clickOffset - metrics.thumbHeight / 2
+      )
+    )
+
+    scrollElement.scrollTop =
+      maxThumbOffset <= 0
+        ? 0
+        : (nextThumbOffset /
+            maxThumbOffset) *
+          maxScrollTop
+    updateMetrics()
+  }
+
+  function handleThumbMouseDown(event) {
+    const scrollElement =
+      localViewportRef.current
+
+    if (
+      !scrollElement ||
+      !metrics.isScrollable
+    ) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    dragRef.current = {
+      startY: event.clientY,
+      startScrollTop:
+        scrollElement.scrollTop,
+    }
+    setIsDragging(true)
+  }
+
+  return (
+    <div
+      className={[
+        'app-scroll-shell',
+        className,
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      <div
+        ref={assignViewportRef}
+        className={[
+          'app-scrollable',
+          viewportClassName,
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
+        {children}
+      </div>
+
+      <div
+        ref={trackRef}
+        className={[
+          'app-scrollbar',
+          metrics.isScrollable
+            ? 'visible'
+            : '',
+          scrollbarClassName,
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        onMouseDown={handleTrackMouseDown}
+        aria-hidden="true"
+      >
+        <div
+          className={[
+            'app-scrollbar-thumb',
+            isDragging ? 'dragging' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          style={{
+            height: metrics.thumbHeight,
+            transform: `translateY(${metrics.thumbOffset}px)`,
+          }}
+          onMouseDown={handleThumbMouseDown}
+        />
       </div>
     </div>
   )
@@ -2145,7 +3018,7 @@ function ProjectorDisplay({
             projectionContentType ===
               PROJECTION_CONTENT_TYPES.SONG &&
             song && (
-              <div className="screen-content">
+              <div className="screen-content screen-content-song">
                 <AutoFitLyrics
                   text={
                     currentSection?.lines.join(
@@ -2188,23 +3061,38 @@ function ProjectorDisplay({
               PROJECTION_CONTENT_TYPES.BIBLE &&
             biblePassage &&
             currentBibleVerse && (
-              <div className="screen-content">
+              <div className="screen-content screen-content-bible">
                 <div className="screen-reference">
                   {biblePassage.reference}
                 </div>
 
                 <AutoFitLyrics
-                  text={`${currentBibleVerse.verseNumber} ${currentBibleVerse.text}`}
+                  text={getBibleProjectionText(
+                    biblePassage,
+                    currentBibleVerse
+                  )}
                   maxFontSize={
-                    lyricsSizing.maxFontSize
+                    showFullscreenControl
+                      ? lyricsSizing.maxFontSize
+                      : Math.min(
+                          lyricsSizing.maxFontSize,
+                          34
+                        )
                   }
                   minFontSize={
-                    lyricsSizing.minFontSize
+                    showFullscreenControl
+                      ? lyricsSizing.minFontSize
+                      : 10
                   }
                   containerClassName={
-                    showFullscreenControl
-                      ? 'lyrics-fit-container-projector'
-                      : ''
+                    [
+                      showFullscreenControl
+                        ? 'lyrics-fit-container-projector'
+                        : '',
+                      'lyrics-fit-container-bible',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')
                   }
                   textClassName={
                     showFullscreenControl
@@ -2429,22 +3317,77 @@ function App() {
   const [error, setError] = useState('')
   const [successMessage, setSuccessMessage] =
     useState('')
+  const [
+    isLearningModeEnabled,
+    setIsLearningModeEnabled,
+  ] = useState(false)
+  const [
+    currentSongLearningReference,
+    setCurrentSongLearningReference,
+  ] = useState(null)
+  const [
+    isLoadingCurrentSongLearningReference,
+    setIsLoadingCurrentSongLearningReference,
+  ] = useState(false)
+  const [
+    learningAudioCurrentTime,
+    setLearningAudioCurrentTime,
+  ] = useState(0)
+  const [
+    learningAudioDuration,
+    setLearningAudioDuration,
+  ] = useState(0)
+  const [
+    learningAudioVolume,
+    setLearningAudioVolume,
+  ] = useState(1)
+  const [
+    isLearningAudioPlaying,
+    setIsLearningAudioPlaying,
+  ] = useState(false)
+  const [
+    selectedSongMelodyReference,
+    setSelectedSongMelodyReference,
+  ] = useState(null)
+  const [
+    isLoadingSelectedSongMelodyReference,
+    setIsLoadingSelectedSongMelodyReference,
+  ] = useState(false)
   const [bibleBooks, setBibleBooks] = useState([])
+  const [
+    bibleTranslations,
+    setBibleTranslations,
+  ] = useState([])
+  const [
+    referenceBibleTranslationCode,
+    setReferenceBibleTranslationCode,
+  ] = useState(
+    BIBLE_TRANSLATION_CODES.FRENCH
+  )
   const [
     selectedBibleChapterMetadata,
     setSelectedBibleChapterMetadata,
   ] = useState(null)
   const [
+    bibleProjectionMode,
+    setBibleProjectionMode,
+  ] = useState(
+    BIBLE_PROJECTION_MODES.FRENCH_ENGLISH
+  )
+  const [
     bibleSelection,
     setBibleSelection,
   ] = useState(DEFAULT_BIBLE_SELECTION)
   const [
-    previewBiblePassage,
-    setPreviewBiblePassage,
+    previewBiblePassageData,
+    setPreviewBiblePassageData,
   ] = useState(null)
   const projectorChannelRef = useRef(null)
   const projectorWindowRef = useRef(null)
   const backgroundInputRef = useRef(null)
+  const learningAudioRef = useRef(null)
+  const melodyReferenceInputRef = useRef(null)
+  const melodyReferenceAudioRef = useRef(null)
   const lastSongProjectionRef = useRef(null)
   const previousVisibleModeRef = useRef('LIVE')
   const latestProjectorStateRef = useRef(
@@ -2658,7 +3601,6 @@ function App() {
     reusedServiceSourceById,
     setReusedServiceSourceById,
   ] = useState({})
-
   function handleSettingsChange(event) {
     const { name, value, type, checked } =
       event.target
@@ -2853,11 +3795,24 @@ function App() {
     }
 
     loadSettings()
-    loadBibleBooks()
+    loadBibleTranslations()
     loadSongs()
     loadPlaylists()
     loadServicePlans()
   }, [isProjectorWindow])
+
+  useEffect(() => {
+    if (isProjectorWindow) {
+      return
+    }
+
+    loadBibleBooks(
+      referenceBibleTranslationCode
+    )
+  }, [
+    referenceBibleTranslationCode,
+    isProjectorWindow,
+  ])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -3161,10 +4116,85 @@ function App() {
     }
   }
 
-  async function loadBibleBooks() {
+  async function loadBibleTranslations() {
     try {
       const response = await fetch(
-        'http://localhost:8080/bible/books'
+        'http://localhost:8080/bible/translations'
+      )
+
+      if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
+        throw new Error(
+          message ||
+            'Could not load Bible translations.'
+        )
+      }
+
+      const data = await response.json()
+
+      if (!Array.isArray(data)) {
+        throw new Error(
+          'Received invalid Bible translations.'
+        )
+      }
+
+      const prioritizedTranslations =
+        data
+          .filter((translation) =>
+            BIBLE_REFERENCE_TRANSLATION_ORDER.includes(
+              translation?.code
+            )
+          )
+          .sort(
+            (left, right) =>
+              BIBLE_REFERENCE_TRANSLATION_ORDER.indexOf(
+                left.code
+              ) -
+              BIBLE_REFERENCE_TRANSLATION_ORDER.indexOf(
+                right.code
+              )
+          )
+
+      setBibleTranslations(
+        prioritizedTranslations
+      )
+      setReferenceBibleTranslationCode(
+        (current) =>
+          normalizeBibleReferenceTranslationCode(
+            current,
+            prioritizedTranslations
+          )
+      )
+    } catch (err) {
+      if (
+        err instanceof TypeError &&
+        err.message === 'Failed to fetch'
+      ) {
+        setError(
+          'Could not load Bible translations. Restart the church-song-api server and try again.'
+        )
+        return
+      }
+
+      setError(
+        err.message ||
+          'Could not load Bible translations.'
+      )
+    }
+  }
+
+  async function loadBibleBooks(
+    translationCode =
+      referenceBibleTranslationCode
+  ) {
+    try {
+      const query = new URLSearchParams({
+        translation: translationCode,
+      })
+      const response = await fetch(
+        `http://localhost:8080/bible/books?${query.toString()}`
       )
 
       if (!response.ok) {
@@ -3210,11 +4240,176 @@ function App() {
     }
   }
 
+  function stopMelodyReferencePlayback(
+    {
+      resetTime = false,
+    } = {}
+  ) {
+    const audio =
+      melodyReferenceAudioRef.current
+
+    if (!audio) {
+      return
+    }
+
+    audio.pause()
+
+    if (resetTime) {
+      audio.currentTime = 0
+    }
+  }
+
+  function stopLearningAudio(
+    { resetTime = false } = {}
+  ) {
+    const audio = learningAudioRef.current
+
+    setIsLearningAudioPlaying(false)
+
+    if (!audio) {
+      if (resetTime) {
+        setLearningAudioCurrentTime(0)
+      }
+      return
+    }
+
+    audio.pause()
+
+    if (resetTime) {
+      audio.currentTime = 0
+      setLearningAudioCurrentTime(0)
+    }
+  }
+
+  async function loadCurrentSongLearningReference(
+    songId = currentSongResolved?.id
+  ) {
+    if (!songId) {
+      setCurrentSongLearningReference(null)
+      setIsLoadingCurrentSongLearningReference(
+        false
+      )
+      return
+    }
+
+    try {
+      setIsLoadingCurrentSongLearningReference(
+        true
+      )
+
+      const response = await fetch(
+        `http://localhost:8080/songs/${songId}/melody-reference`
+      )
+
+      if (response.status === 404) {
+        setCurrentSongLearningReference(null)
+        return
+      }
+
+      if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
+        throw new Error(
+          message ||
+            'Could not load the reference audio.'
+        )
+      }
+
+      const data = await response.json()
+      setCurrentSongLearningReference(data)
+    } catch (err) {
+      setCurrentSongLearningReference(null)
+
+      if (
+        err instanceof TypeError &&
+        err.message === 'Failed to fetch'
+      ) {
+        setError(
+          'Could not load the reference audio. Restart the church-song-api server and try again.'
+        )
+        return
+      }
+
+      setError(
+        err.message ||
+          'Could not load the reference audio.'
+      )
+    } finally {
+      setIsLoadingCurrentSongLearningReference(
+        false
+      )
+    }
+  }
+
+  async function loadSelectedSongMelodyReference(
+    songId = selectedSongResolved?.id
+  ) {
+    if (!songId) {
+      setSelectedSongMelodyReference(null)
+      setIsLoadingSelectedSongMelodyReference(
+        false
+      )
+      return
+    }
+
+    try {
+      setIsLoadingSelectedSongMelodyReference(
+        true
+      )
+
+      const response = await fetch(
+        `http://localhost:8080/songs/${songId}/melody-reference`
+      )
+
+      if (response.status === 404) {
+        setSelectedSongMelodyReference(null)
+        return
+      }
+
+      if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
+        throw new Error(
+          message ||
+            'Could not load the song melody reference.'
+        )
+      }
+
+      const data = await response.json()
+      setSelectedSongMelodyReference(data)
+    } catch (err) {
+      setSelectedSongMelodyReference(null)
+
+      if (
+        err instanceof TypeError &&
+        err.message === 'Failed to fetch'
+      ) {
+        setError(
+          'Could not load the song melody reference. Restart the church-song-api server and try again.'
+        )
+        return
+      }
+
+      setError(
+        err.message ||
+          'Could not load the song melody reference.'
+      )
+    } finally {
+      setIsLoadingSelectedSongMelodyReference(
+        false
+      )
+    }
+  }
+
   async function loadBibleChapterMetadata(
     {
       bookKey,
       chapter,
-    } = bibleSelection
+    } = bibleSelection,
+    translationCode =
+      referenceBibleTranslationCode
   ) {
     if (!bookKey || !chapter) {
       setSelectedBibleChapterMetadata(null)
@@ -3223,7 +4418,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://localhost:8080/bible/books/${bookKey}/chapters/${chapter}/metadata`
+        `http://localhost:8080/bible/books/${bookKey}/chapters/${chapter}/metadata?${new URLSearchParams({ translation: translationCode }).toString()}`
       )
 
       if (!response.ok) {
@@ -3299,7 +4494,7 @@ function App() {
   function handleBibleBookChange(event) {
     const nextBookKey = event.target.value
 
-    setPreviewBiblePassage(null)
+    setPreviewBiblePassageData(null)
     setBibleSelection((current) =>
       normalizeBibleSelection(
         {
@@ -3314,12 +4509,29 @@ function App() {
     )
   }
 
+  function handleReferenceBibleTranslationChange(
+    translationCode
+  ) {
+    if (
+      translationCode ===
+      referenceBibleTranslationCode
+    ) {
+      return
+    }
+
+    setPreviewBiblePassageData(null)
+    setSelectedBibleChapterMetadata(null)
+    setReferenceBibleTranslationCode(
+      translationCode
+    )
+  }
+
   function handleBibleChapterChange(event) {
     const nextChapter = Number(
       event.target.value
     )
 
-    setPreviewBiblePassage(null)
+    setPreviewBiblePassageData(null)
     setBibleSelection((current) =>
       normalizeBibleSelection(
         {
@@ -3338,7 +4550,7 @@ function App() {
       event.target.value
     )
 
-    setPreviewBiblePassage(null)
+    setPreviewBiblePassageData(null)
     setBibleSelection((current) =>
       normalizeBibleSelection(
         {
@@ -3359,7 +4571,7 @@ function App() {
       event.target.value
     )
 
-    setPreviewBiblePassage(null)
+    setPreviewBiblePassageData(null)
     setBibleSelection((current) =>
       normalizeBibleSelection(
         {
@@ -3390,6 +4602,8 @@ function App() {
         endVerse: String(
           bibleSelection.endVerse
         ),
+        translation:
+          referenceBibleTranslationCode,
       })
       const response = await fetch(
         `http://localhost:8080/bible/passage?${query.toString()}`
@@ -3401,12 +4615,18 @@ function App() {
 
         throw new Error(
           message ||
-            'Could not preview Bible passage.'
+            'Could not preview the selected Bible passage.'
         )
       }
 
-      const data = await response.json()
-      setPreviewBiblePassage(data)
+      const referencePassage =
+        await response.json()
+
+      setPreviewBiblePassageData({
+        translationCode:
+          referenceBibleTranslationCode,
+        referencePassage,
+      })
     } catch (err) {
       if (
         err instanceof TypeError &&
@@ -3425,7 +4645,106 @@ function App() {
     }
   }
 
-  function projectBiblePassage() {
+  async function loadBiblePassageSet(
+    startVerse,
+    endVerse
+  ) {
+    const query = new URLSearchParams({
+      book: bibleSelection.bookKey,
+      chapter: String(
+        bibleSelection.chapter
+      ),
+      startVerse: String(startVerse),
+      endVerse: String(endVerse),
+    })
+    const [
+      frenchResponse,
+      englishResponse,
+      spanishResponse,
+    ] = await Promise.all([
+      fetch(
+        `http://localhost:8080/bible/passage?${new URLSearchParams({
+          ...Object.fromEntries(
+            query.entries()
+          ),
+          translation:
+            BIBLE_TRANSLATION_CODES.FRENCH,
+        }).toString()}`
+      ),
+      fetch(
+        `http://localhost:8080/bible/passage?${new URLSearchParams({
+          ...Object.fromEntries(
+            query.entries()
+          ),
+          translation:
+            BIBLE_TRANSLATION_CODES.ENGLISH,
+        }).toString()}`
+      ),
+      fetch(
+        `http://localhost:8080/bible/passage?${new URLSearchParams({
+          ...Object.fromEntries(
+            query.entries()
+          ),
+          translation:
+            BIBLE_TRANSLATION_CODES.SPANISH,
+        }).toString()}`
+      ),
+    ])
+
+    if (!frenchResponse.ok) {
+      const message =
+        await readErrorMessage(
+          frenchResponse
+        )
+
+      throw new Error(
+        message ||
+          'Could not load the French Bible passage.'
+      )
+    }
+
+    if (!englishResponse.ok) {
+      const message =
+        await readErrorMessage(
+          englishResponse
+        )
+
+      throw new Error(
+        message ||
+          'Could not load the English Bible passage.'
+      )
+    }
+
+    if (!spanishResponse.ok) {
+      const message =
+        await readErrorMessage(
+          spanishResponse
+        )
+
+      throw new Error(
+        message ||
+          'Could not load the Spanish Bible passage.'
+      )
+    }
+
+    const [
+      frenchPassage,
+      englishPassage,
+      spanishPassage,
+    ] = await Promise.all([
+      frenchResponse.json(),
+      englishResponse.json(),
+      spanishResponse.json(),
+    ])
+
+    return {
+      frenchPassage,
+      englishPassage,
+      spanishPassage,
+    }
+  }
+
+  async function projectBiblePassage() {
     if (
       !previewBiblePassage ||
       !previewBiblePassage.verses?.length
@@ -3433,35 +4752,146 @@ function App() {
       return
     }
 
+    const availableVerseNumbers =
+      selectedBibleChapterMetadata?.availableVerseNumbers ||
+      []
+    const chapterFirstVerse =
+      availableVerseNumbers[0]
+    const chapterLastVerse =
+      availableVerseNumbers[
+        availableVerseNumbers.length - 1
+      ]
+
     if (
-      projectionContentType ===
-      PROJECTION_CONTENT_TYPES.SONG
+      !Number.isInteger(chapterFirstVerse) ||
+      !Number.isInteger(chapterLastVerse)
     ) {
-      lastSongProjectionRef.current = {
-        song:
-          previewSong ||
-          currentSongResolved ||
-          null,
-        sectionIndex,
-      }
-    } else if (
-      lastSongProjectionRef.current == null &&
-      currentSongResolved
-    ) {
-      lastSongProjectionRef.current = {
-        song: currentSongResolved,
-        sectionIndex,
-      }
+      setError(
+        'Could not determine the available verses for this Bible chapter.'
+      )
+      return
     }
 
-    setProjectionContentType(
-      PROJECTION_CONTENT_TYPES.BIBLE
-    )
-    setProjectedBiblePassage(
-      previewBiblePassage
-    )
-    setProjectedBibleVerseIndex(0)
-    setProjectionMode('LIVE')
+    try {
+      setError('')
+
+      const chapterPassageData =
+        await loadBiblePassageSet(
+          chapterFirstVerse,
+          chapterLastVerse
+        )
+      const chapterBiblePassage =
+        createBiblePreviewPassage({
+          mode: bibleProjectionMode,
+          frenchPassage:
+            chapterPassageData.frenchPassage,
+          englishPassage:
+            chapterPassageData.englishPassage,
+          spanishPassage:
+            chapterPassageData.spanishPassage,
+        })
+
+      if (
+        !chapterBiblePassage ||
+        !chapterBiblePassage.verses?.length
+      ) {
+        throw new Error(
+          'Could not load the selected Bible chapter for projection.'
+        )
+      }
+
+      const targetVerseIndex =
+        chapterBiblePassage.verses.findIndex(
+          (verse) =>
+            verse.verseNumber ===
+            bibleSelection.startVerse
+        )
+
+      if (
+        projectionContentType ===
+        PROJECTION_CONTENT_TYPES.SONG
+      ) {
+        lastSongProjectionRef.current = {
+          song:
+            previewSong ||
+            currentSongResolved ||
+            null,
+          sectionIndex,
+        }
+      } else if (
+        lastSongProjectionRef.current == null &&
+        currentSongResolved
+      ) {
+        lastSongProjectionRef.current = {
+          song: currentSongResolved,
+          sectionIndex,
+        }
+      }
+
+      setProjectionContentType(
+        PROJECTION_CONTENT_TYPES.BIBLE
+      )
+      setProjectedBiblePassage(
+        chapterBiblePassage
+      )
+      setProjectedBibleVerseIndex(
+        targetVerseIndex >= 0
+          ? targetVerseIndex
+          : 0
+      )
+      setProjectionMode('LIVE')
+    } catch (err) {
+      if (
+        err instanceof TypeError &&
+        err.message === 'Failed to fetch'
+      ) {
+        setError(
+          'Could not send Bible passage to the projector. Restart the church-song-api server and try again.'
+        )
+        return
+      }
+
+      setError(
+        err.message ||
+          'Could not send Bible passage to the projector.'
+      )
+    }
+  }
+
+  function handleBibleProjectionModeChange(
+    nextMode
+  ) {
+    setBibleProjectionMode(nextMode)
+
+    if (
+      !isBibleProjectionActive ||
+      !projectedBiblePassage
+    ) {
+      return
+    }
+
+    const nextProjectedBiblePassage =
+      createBiblePreviewPassage({
+        mode: nextMode,
+        frenchPassage:
+          projectedBiblePassage.translations
+            ?.FRENCH || null,
+        englishPassage:
+          projectedBiblePassage.translations
+            ?.ENGLISH || null,
+        spanishPassage:
+          projectedBiblePassage.translations
+            ?.SPANISH || null,
+      })
+
+    if (
+      nextProjectedBiblePassage?.verses
+        ?.length
+    ) {
+      setProjectedBiblePassage(
+        nextProjectedBiblePassage
+      )
+    }
   }
 
   function returnToSongProjection() {
@@ -4009,6 +5439,19 @@ function App() {
       : 'Service Playlist'
   const completableServiceTarget =
     getCompletableServiceTarget()
+  const selectedReferenceBibleTranslation =
+    useMemo(
+      () =>
+        bibleTranslations.find(
+          (translation) =>
+            translation.code ===
+            referenceBibleTranslationCode
+        ) || null,
+      [
+        bibleTranslations,
+        referenceBibleTranslationCode,
+      ]
+    )
   const selectedBibleBook = useMemo(
     () =>
       findBibleBook(
@@ -4029,6 +5472,47 @@ function App() {
         (_, index) => index + 1
       )
     }, [selectedBibleBook])
+  const previewBiblePassage = useMemo(
+    () =>
+      createBiblePreviewPassage({
+        mode:
+          getPreviewProjectionModeForTranslation(
+            previewBiblePassageData?.translationCode ||
+              referenceBibleTranslationCode
+          ),
+        frenchPassage:
+          (
+            previewBiblePassageData?.translationCode ||
+            referenceBibleTranslationCode
+          ) ===
+          BIBLE_TRANSLATION_CODES.FRENCH
+            ? previewBiblePassageData?.referencePassage ||
+              null
+            : null,
+        englishPassage:
+          (
+            previewBiblePassageData?.translationCode ||
+            referenceBibleTranslationCode
+          ) ===
+          BIBLE_TRANSLATION_CODES.ENGLISH
+            ? previewBiblePassageData?.referencePassage ||
+              null
+            : null,
+        spanishPassage:
+          (
+            previewBiblePassageData?.translationCode ||
+            referenceBibleTranslationCode
+          ) ===
+          BIBLE_TRANSLATION_CODES.SPANISH
+            ? previewBiblePassageData?.referencePassage ||
+              null
+            : null,
+      }),
+    [
+      previewBiblePassageData,
+      referenceBibleTranslationCode,
+    ]
+  )
   const selectedBibleVerseOptions =
     selectedBibleChapterMetadata
       ?.availableVerseNumbers || []
@@ -4186,6 +5670,19 @@ function App() {
     currentSongSourceId ??
     currentSongResolved?.id ??
     null
+  const liveBibleReference =
+    isBibleProjectionActive &&
+    currentBibleVerse
+      ? getLiveBibleReference(
+          projectedBiblePassage,
+          currentBibleVerse.verseNumber
+        )
+      : previewBiblePassage
+        ? getLiveBibleReference(
+            previewBiblePassage,
+            bibleSelection.startVerse
+          )
+        : ''
   const selectedSongFamilyId =
     getValidSongFamilyId(selectedSongResolved)
   const currentSongFamilyId =
@@ -4513,6 +6010,67 @@ function App() {
   ])
 
   useEffect(() => {
+    loadSelectedSongMelodyReference(
+      selectedSongResolved?.id
+    )
+  }, [
+    selectedSongResolved?.id,
+    selectedSongResolved?.familyId,
+  ])
+
+  useEffect(() => {
+    if (activeView === 'songs') {
+      return
+    }
+
+    stopMelodyReferencePlayback({
+      resetTime: true,
+    })
+  }, [activeView])
+
+  useEffect(() => {
+    stopMelodyReferencePlayback({
+      resetTime: true,
+    })
+  }, [selectedSongResolved?.id])
+
+  useEffect(() => {
+    stopLearningAudio({
+      resetTime: true,
+    })
+    setLearningAudioDuration(0)
+
+    if (
+      !isLearningModeEnabled ||
+      !currentSongResolved?.id
+    ) {
+      setCurrentSongLearningReference(null)
+      setIsLoadingCurrentSongLearningReference(
+        false
+      )
+      return
+    }
+
+    loadCurrentSongLearningReference(
+      currentSongResolved.id
+    )
+  }, [
+    isLearningModeEnabled,
+    currentSongResolved?.id,
+    currentSongResolved?.familyId,
+  ])
+
+  useEffect(() => {
+    if (activeView === 'operator') {
+      return
+    }
+
+    stopLearningAudio({
+      resetTime: true,
+    })
+  }, [activeView])
+
+  useEffect(() => {
     if (
       activeView !== 'songs' ||
       pendingSongsScrollId == null
@@ -4548,11 +6106,15 @@ function App() {
       return
     }
 
-    loadBibleChapterMetadata({
-      bookKey: bibleSelection.bookKey,
-      chapter: bibleSelection.chapter,
-    })
+    loadBibleChapterMetadata(
+      {
+        bookKey: bibleSelection.bookKey,
+        chapter: bibleSelection.chapter,
+      },
+      referenceBibleTranslationCode
+    )
   }, [
+    referenceBibleTranslationCode,
     bibleSelection.bookKey,
     bibleSelection.chapter,
     selectedBibleBook,
@@ -5227,6 +6789,221 @@ function App() {
     } catch (err) {
       setError(err.message)
     }
+  }
+
+  function openMelodyReferenceFilePicker() {
+    if (!selectedSongResolved?.id) {
+      return
+    }
+
+    melodyReferenceInputRef.current?.click()
+  }
+
+  async function handleMelodyReferenceFileSelected(
+    event
+  ) {
+    const file =
+      event.target.files?.[0] || null
+
+    if (!file || !selectedSongResolved?.id) {
+      event.target.value = ''
+      return
+    }
+
+    try {
+      setError('')
+
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const response = await fetch(
+        `http://localhost:8080/songs/${selectedSongResolved.id}/melody-reference`,
+        {
+          method: 'POST',
+          body: formData,
+        }
+      )
+
+      if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
+        throw new Error(
+          message ||
+            'Could not upload the melody reference.'
+        )
+      }
+
+      const melodyReference =
+        await response.json()
+
+      stopMelodyReferencePlayback({
+        resetTime: true,
+      })
+      setSelectedSongMelodyReference(
+        melodyReference
+      )
+      setSuccessMessage(
+        selectedSongMelodyReference
+          ? 'Melody reference replaced successfully.'
+          : 'Melody reference uploaded successfully.'
+      )
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      event.target.value = ''
+    }
+  }
+
+  async function deleteSelectedSongMelodyReference() {
+    if (
+      !selectedSongResolved?.id ||
+      !selectedSongMelodyReference
+    ) {
+      return
+    }
+
+    const shouldDelete = window.confirm(
+      'Delete this song melody reference?\n\nThis removes the reference recording but does not delete the song or Song Family.'
+    )
+
+    if (!shouldDelete) {
+      return
+    }
+
+    try {
+      setError('')
+
+      const response = await fetch(
+        `http://localhost:8080/songs/${selectedSongResolved.id}/melody-reference`,
+        {
+          method: 'DELETE',
+        }
+      )
+
+      if (!response.ok) {
+        const message =
+          await readErrorMessage(response)
+
+        throw new Error(
+          message ||
+            'Could not delete the melody reference.'
+        )
+      }
+
+      stopMelodyReferencePlayback({
+        resetTime: true,
+      })
+      setSelectedSongMelodyReference(null)
+      setSuccessMessage(
+        'Melody reference deleted.'
+      )
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function playSelectedSongMelodyReference() {
+    if (!selectedSongMelodyReference) {
+      return
+    }
+
+    const audio =
+      melodyReferenceAudioRef.current
+
+    if (!audio) {
+      return
+    }
+
+    try {
+      setError('')
+      audio.currentTime = 0
+      await audio.play()
+    } catch (err) {
+      setError(
+        'Could not play the song melody reference.'
+      )
+    }
+  }
+
+  async function toggleLearningAudioPlayback() {
+    const audio = learningAudioRef.current
+
+    if (
+      !audio ||
+      !currentSongLearningReference
+    ) {
+      return
+    }
+
+    try {
+      setError('')
+
+      if (audio.paused) {
+        await audio.play()
+        return
+      }
+
+      audio.pause()
+    } catch (err) {
+      setError(
+        'Could not play the reference audio.'
+      )
+    }
+  }
+
+  async function restartLearningAudio() {
+    const audio = learningAudioRef.current
+
+    if (
+      !audio ||
+      !currentSongLearningReference
+    ) {
+      return
+    }
+
+    try {
+      setError('')
+      audio.currentTime = 0
+      setLearningAudioCurrentTime(0)
+      await audio.play()
+    } catch (err) {
+      setError(
+        'Could not restart the reference audio.'
+      )
+    }
+  }
+
+  function handleLearningAudioSeek(event) {
+    const nextTime = Number(
+      event.target.value
+    )
+    const audio = learningAudioRef.current
+
+    setLearningAudioCurrentTime(nextTime)
+
+    if (!audio) {
+      return
+    }
+
+    audio.currentTime = nextTime
+  }
+
+  function handleLearningAudioVolumeChange(
+    event
+  ) {
+    const nextVolume = Number(
+      event.target.value
+    )
+    const audio = learningAudioRef.current
+
+    setLearningAudioVolume(nextVolume)
+
+    if (!audio) {
+      return
+    }
+
+    audio.volume = nextVolume
   }
 
   async function createTranslation() {
@@ -7753,7 +9530,11 @@ function App() {
                   ))}
                 </div>
 
-                <div className="song-list">
+                <AppScrollArea
+                  className="song-list-shell"
+                  viewportClassName="song-list"
+                  dependencyKey={`${activeView}-${filteredSongs.length}-${typeFilter}-${search}`}
+                >
                   {filteredSongs.map(
                     (song) => (
                       <button
@@ -7814,7 +9595,7 @@ function App() {
                       </button>
                     )
                   )}
-                </div>
+                </AppScrollArea>
               </section>
 
               <section className="console-card service-card">
@@ -7921,247 +9702,251 @@ function App() {
                   </button>
                 </div>
 
-                <div className="service-song-list">
-                  {playlistSongs.map(
-                    (song, index) => (
-                      <div
-                        key={song.id}
-                        className={[
-                          'service-song',
-                          currentSongSelectionId ===
-                          song.id
-                            ? 'selected'
-                            : '',
-                          dragOverSongIndex ===
-                          index
-                            ? 'drag-over'
-                            : '',
-                          draggedSongIndex ===
-                          index
-                            ? 'dragging'
-                            : '',
-                        ]
-                          .filter(Boolean)
-                          .join(' ')}
-                        role="button"
-                        tabIndex="0"
-                        onClick={() => {
-                          selectPlaylistSong(song)
-                        }}
-                        onKeyDown={(event) => {
-                          if (
-                            event.key ===
-                              'Enter' ||
-                            event.key === ' '
-                          ) {
-                            event.preventDefault()
+                <AppScrollArea
+                  className="service-song-list-shell"
+                  viewportClassName="service-song-list"
+                  dependencyKey={`${selectedPlaylist?.id || loadedServicePlan?.id || 'none'}-${playlistSongs.length}`}
+                >
+                    {playlistSongs.map(
+                      (song, index) => (
+                        <div
+                          key={song.id}
+                          className={[
+                            'service-song',
+                            currentSongSelectionId ===
+                            song.id
+                              ? 'selected'
+                              : '',
+                            dragOverSongIndex ===
+                            index
+                              ? 'drag-over'
+                              : '',
+                            draggedSongIndex ===
+                            index
+                              ? 'dragging'
+                              : '',
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
+                          role="button"
+                          tabIndex="0"
+                          onClick={() => {
                             selectPlaylistSong(song)
-                          }
-                        }}
-                        onDragOver={(event) => {
-                          event.preventDefault()
-
-                          event.dataTransfer.dropEffect =
-                            'move'
-
-                          if (
-                            draggedSongIndex !==
-                              null &&
-                            draggedSongIndex !==
-                              index
-                          ) {
-                            setDragOverSongIndex(
-                              index
-                            )
-                          }
-                        }}
-                        onDrop={(event) => {
-                          event.preventDefault()
-
-                          const sourceIndex =
-                            draggedSongIndex !==
-                            null
-                              ? draggedSongIndex
-                              : Number(
-                                  event.dataTransfer.getData(
-                                    'text/plain'
-                                  )
-                                )
-
-                          if (
-                            Number.isInteger(
-                              sourceIndex
-                            ) &&
-                            sourceIndex !==
-                              index
-                          ) {
+                          }}
+                          onKeyDown={(event) => {
                             if (
-                              loadedServicePlan
+                              event.key ===
+                                'Enter' ||
+                              event.key === ' '
                             ) {
-                              moveSongInServicePlan(
-                                sourceIndex,
+                              event.preventDefault()
+                              selectPlaylistSong(song)
+                            }
+                          }}
+                          onDragOver={(event) => {
+                            event.preventDefault()
+
+                            event.dataTransfer.dropEffect =
+                              'move'
+
+                            if (
+                              draggedSongIndex !==
+                                null &&
+                              draggedSongIndex !==
                                 index
-                              )
-                            } else {
-                              moveSongInPlaylist(
-                                sourceIndex,
+                            ) {
+                              setDragOverSongIndex(
                                 index
                               )
                             }
-                          }
+                          }}
+                          onDrop={(event) => {
+                            event.preventDefault()
 
-                          setDraggedSongIndex(
-                            null
-                          )
+                            const sourceIndex =
+                              draggedSongIndex !==
+                              null
+                                ? draggedSongIndex
+                                : Number(
+                                    event.dataTransfer.getData(
+                                      'text/plain'
+                                    )
+                                  )
 
-                          setDragOverSongIndex(
-                            null
-                          )
-                        }}
-                      >
-                        <span className="song-order">
-                          {index + 1}
-                        </span>
-
-                        <div className="service-song-copy">
-                          <strong>
-                            {song.title}
-                          </strong>
-
-                          <span>
-                            {song.author ||
-                              'Unknown author'}
-                          </span>
-                        </div>
-
-                        <div className="playlist-row-actions">
-                          <span
-                            className="reorder-icon drag-handle"
-                            draggable="true"
-                            title="Drag to reorder"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                            }}
-                            onDragStart={(
-                              event
-                            ) => {
-                              event.stopPropagation()
-
-                              setDraggedSongIndex(
+                            if (
+                              Number.isInteger(
+                                sourceIndex
+                              ) &&
+                              sourceIndex !==
                                 index
-                              )
-
-                              setDragOverSongIndex(
-                                null
-                              )
-
-                              event.dataTransfer.effectAllowed =
-                                'move'
-
-                              event.dataTransfer.setData(
-                                'text/plain',
-                                String(index)
-                              )
-                            }}
-                            onDragEnd={() => {
-                              setDraggedSongIndex(
-                                null
-                              )
-
-                              setDragOverSongIndex(
-                                null
-                              )
-                            }}
-                          >
-                            ⋮⋮
-                          </span>
-
-                          <button
-                            className="move-song-button"
-                            disabled={
-                              index === 0
-                            }
-                            onClick={(event) => {
-                              event.stopPropagation()
-
+                            ) {
                               if (
                                 loadedServicePlan
                               ) {
                                 moveSongInServicePlan(
-                                  index,
-                                  index - 1
+                                  sourceIndex,
+                                  index
                                 )
                               } else {
                                 moveSongInPlaylist(
-                                  index,
-                                  index - 1
+                                  sourceIndex,
+                                  index
                                 )
                               }
-                            }}
-                            title="Move song up"
-                          >
-                            ↑
-                          </button>
-
-                          <button
-                            className="move-song-button"
-                            disabled={
-                              index ===
-                              playlistSongs.length -
-                                1
                             }
-                            onClick={(event) => {
-                              event.stopPropagation()
 
-                              if (
-                                loadedServicePlan
-                              ) {
-                                moveSongInServicePlan(
-                                  index,
-                                  index + 1
+                            setDraggedSongIndex(
+                              null
+                            )
+
+                            setDragOverSongIndex(
+                              null
+                            )
+                          }}
+                        >
+                          <span className="song-order">
+                            {index + 1}
+                          </span>
+
+                          <div className="service-song-copy">
+                            <strong>
+                              {song.title}
+                            </strong>
+
+                            <span>
+                              {song.author ||
+                                'Unknown author'}
+                            </span>
+                          </div>
+
+                          <div className="playlist-row-actions">
+                            <span
+                              className="reorder-icon drag-handle"
+                              draggable="true"
+                              title="Drag to reorder"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                              }}
+                              onDragStart={(
+                                event
+                              ) => {
+                                event.stopPropagation()
+
+                                setDraggedSongIndex(
+                                  index
                                 )
-                              } else {
-                                moveSongInPlaylist(
-                                  index,
-                                  index + 1
+
+                                setDragOverSongIndex(
+                                  null
                                 )
+
+                                event.dataTransfer.effectAllowed =
+                                  'move'
+
+                                event.dataTransfer.setData(
+                                  'text/plain',
+                                  String(index)
+                                )
+                              }}
+                              onDragEnd={() => {
+                                setDraggedSongIndex(
+                                  null
+                                )
+
+                                setDragOverSongIndex(
+                                  null
+                                )
+                              }}
+                            >
+                              ⋮⋮
+                            </span>
+
+                            <button
+                              className="move-song-button"
+                              disabled={
+                                index === 0
                               }
-                            }}
-                            title="Move song down"
-                          >
-                            ↓
-                          </button>
+                              onClick={(event) => {
+                                event.stopPropagation()
 
-                          <button
-                            className="remove-song-button"
-                            onClick={(event) => {
-                              event.stopPropagation()
+                                if (
+                                  loadedServicePlan
+                                ) {
+                                  moveSongInServicePlan(
+                                    index,
+                                    index - 1
+                                  )
+                                } else {
+                                  moveSongInPlaylist(
+                                    index,
+                                    index - 1
+                                  )
+                                }
+                              }}
+                              title="Move song up"
+                            >
+                              ↑
+                            </button>
 
-                              if (
-                                loadedServicePlan
-                              ) {
-                                removeSongFromServicePlan(
-                                  song
-                                )
-                              } else {
-                                removeSongFromPlaylist(
-                                  song
-                                )
+                            <button
+                              className="move-song-button"
+                              disabled={
+                                index ===
+                                playlistSongs.length -
+                                  1
                               }
-                            }}
-                            title={
-                              loadedServicePlan
-                                ? 'Remove from service plan'
-                                : 'Remove from playlist'
-                            }
-                          >
-                            ×
-                          </button>
+                              onClick={(event) => {
+                                event.stopPropagation()
+
+                                if (
+                                  loadedServicePlan
+                                ) {
+                                  moveSongInServicePlan(
+                                    index,
+                                    index + 1
+                                  )
+                                } else {
+                                  moveSongInPlaylist(
+                                    index,
+                                    index + 1
+                                  )
+                                }
+                              }}
+                              title="Move song down"
+                            >
+                              ↓
+                            </button>
+
+                            <button
+                              className="remove-song-button"
+                              onClick={(event) => {
+                                event.stopPropagation()
+
+                                if (
+                                  loadedServicePlan
+                                ) {
+                                  removeSongFromServicePlan(
+                                    song
+                                  )
+                                } else {
+                                  removeSongFromPlaylist(
+                                    song
+                                  )
+                                }
+                              }}
+                              title={
+                                loadedServicePlan
+                                  ? 'Remove from service plan'
+                                  : 'Remove from playlist'
+                              }
+                            >
+                              ×
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    )
-                  )}
-                </div>
+                      )
+                    )}
+                </AppScrollArea>
 
                 <button
                   className="add-song-button"
@@ -8212,6 +9997,195 @@ function App() {
                           ).label
                         }
                       </span>
+                    )}
+                  </div>
+
+                  <div className="learning-mode-panel">
+                    <div className="learning-mode-header">
+                      <div className="learning-mode-copy-wrap">
+                        <p className="small-title">
+                          Learning Mode
+                        </p>
+                        <p className="learning-mode-copy">
+                          Play reference audio
+                          locally while lyrics and
+                          projection stay in their
+                          normal worship flow.
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        className={`button ${
+                          isLearningModeEnabled
+                            ? 'button-primary'
+                            : 'button-secondary'
+                        } button-compact`}
+                        onClick={() => {
+                          setError('')
+                          setIsLearningModeEnabled(
+                            (current) => !current
+                          )
+                        }}
+                        aria-pressed={
+                          isLearningModeEnabled
+                        }
+                      >
+                        {isLearningModeEnabled
+                          ? 'Learning Mode On'
+                          : 'Learning Mode Off'}
+                      </button>
+                    </div>
+
+                    {isLearningModeEnabled && (
+                      <>
+                        {!currentSongResolved ? (
+                          <div className="inline-note learning-mode-note">
+                            Select a song to use
+                            Learning Mode.
+                          </div>
+                        ) : isLoadingCurrentSongLearningReference ? (
+                          <div className="inline-note learning-mode-note">
+                            Loading reference
+                            audio…
+                          </div>
+                        ) : currentSongLearningReference ? (
+                          <div className="learning-audio-player">
+                            <audio
+                              ref={learningAudioRef}
+                              className="learning-audio-element"
+                              preload="metadata"
+                              src={getMelodyReferenceAudioUrl(
+                                currentSongLearningReference
+                              )}
+                              onLoadedMetadata={(
+                                event
+                              ) => {
+                                event.currentTarget.volume =
+                                  learningAudioVolume
+                                setLearningAudioDuration(
+                                  event.currentTarget
+                                    .duration || 0
+                                )
+                                setLearningAudioCurrentTime(
+                                  event.currentTarget
+                                    .currentTime || 0
+                                )
+                              }}
+                              onTimeUpdate={(
+                                event
+                              ) => {
+                                setLearningAudioCurrentTime(
+                                  event.currentTarget
+                                    .currentTime || 0
+                                )
+                              }}
+                              onPlay={() =>
+                                setIsLearningAudioPlaying(
+                                  true
+                                )
+                              }
+                              onPause={() =>
+                                setIsLearningAudioPlaying(
+                                  false
+                                )
+                              }
+                              onEnded={() => {
+                                setIsLearningAudioPlaying(
+                                  false
+                                )
+                                if (
+                                  learningAudioRef.current
+                                ) {
+                                  learningAudioRef.current.currentTime =
+                                    0
+                                }
+                                setLearningAudioCurrentTime(
+                                  0
+                                )
+                              }}
+                            />
+
+                            <div className="learning-audio-actions">
+                              <button
+                                type="button"
+                                className="button button-secondary button-compact"
+                                onClick={
+                                  toggleLearningAudioPlayback
+                                }
+                              >
+                                {isLearningAudioPlaying
+                                  ? 'Pause'
+                                  : 'Play'}
+                              </button>
+
+                              <button
+                                type="button"
+                                className="button button-secondary button-compact"
+                                onClick={
+                                  restartLearningAudio
+                                }
+                              >
+                                Restart
+                              </button>
+                            </div>
+
+                            <div className="learning-audio-timeline">
+                              <span>
+                                {formatAudioTime(
+                                  learningAudioCurrentTime
+                                )}
+                              </span>
+
+                              <input
+                                type="range"
+                                min="0"
+                                max={Math.max(
+                                  learningAudioDuration,
+                                  0
+                                )}
+                                step="0.1"
+                                value={Math.min(
+                                  learningAudioCurrentTime,
+                                  learningAudioDuration ||
+                                    0
+                                )}
+                                onChange={
+                                  handleLearningAudioSeek
+                                }
+                              />
+
+                              <span>
+                                {formatAudioTime(
+                                  learningAudioDuration
+                                )}
+                              </span>
+                            </div>
+
+                            <div className="learning-audio-volume">
+                              <span>Volume</span>
+
+                              <input
+                                type="range"
+                                min="0"
+                                max="1"
+                                step="0.01"
+                                value={
+                                  learningAudioVolume
+                                }
+                                onChange={
+                                  handleLearningAudioVolumeChange
+                                }
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="inline-note learning-mode-note">
+                            No reference audio
+                            attached to this song.
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
 
@@ -8647,7 +10621,7 @@ function App() {
         )}
 
         {activeView === 'bible' && (
-          <div className="admin-view">
+          <div className="admin-view bible-view">
             <header className="service-header">
               <div>
                 <p className="page-kicker">
@@ -8689,6 +10663,39 @@ function App() {
                 </div>
 
                 <div className="bible-form-grid">
+                  <div className="bible-form-field bible-reference-language-field">
+                    <span>Bible Language</span>
+
+                    <div className="bible-reference-language-pills">
+                      {bibleTranslations.map(
+                        (translation) => (
+                          <button
+                            key={translation.code}
+                            type="button"
+                            className={[
+                              'bible-reference-language-pill',
+                              referenceBibleTranslationCode ===
+                              translation.code
+                                ? 'active'
+                                : '',
+                            ]
+                              .filter(Boolean)
+                              .join(' ')}
+                            onClick={() =>
+                              handleReferenceBibleTranslationChange(
+                                translation.code
+                              )
+                            }
+                          >
+                            {getBibleReferenceTranslationLabel(
+                              translation
+                            )}
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </div>
+
                   <label className="bible-form-field">
                     <span>Book</span>
                     <select
@@ -8707,7 +10714,10 @@ function App() {
                           key={book.key}
                           value={book.key}
                         >
-                          {book.name}
+                          {getBibleBookDisplayName(
+                            book.key,
+                            book.name
+                          )}
                         </option>
                       ))}
                     </select>
@@ -8810,36 +10820,62 @@ function App() {
               </section>
 
               <section className="console-card bible-preview-card">
-                <div className="card-header">
-                  <div>
-                    <p className="card-kicker">
-                      Passage Preview
-                    </p>
-
-                    <h3>
-                      {previewBiblePassage
-                        ?.reference ||
-                        'Choose a passage'}
-                    </h3>
-                  </div>
-
-                  {previewBiblePassage
-                    ?.translationCode && (
-                    <span className="number-pill">
-                      {
-                        previewBiblePassage.translationCode
-                      }
-                    </span>
-                  )}
-                </div>
-
                 {previewBiblePassage ? (
                   <>
-                    <div className="bible-preview-reference">
-                      {previewBiblePassage.translationName}
+                    <div className="bible-preview-sticky-header">
+                      <div className="card-header bible-preview-card-header">
+                        <div>
+                          <p className="card-kicker">
+                            Passage Preview
+                          </p>
+
+                          <h3>
+                            {previewBiblePassage.reference}
+                          </h3>
+                        </div>
+
+                        <div className="bible-preview-code-list">
+                          {(
+                            previewBiblePassage
+                              .projectionMode ===
+                            BIBLE_PROJECTION_MODES.FRENCH_ENGLISH
+                              ? [
+                                  BIBLE_TRANSLATION_CODES.FRENCH,
+                                  BIBLE_TRANSLATION_CODES.ENGLISH,
+                                ]
+                              : [
+                                  previewBiblePassage.translationCode,
+                                ]
+                          ).map((code) => (
+                            <span
+                              key={code}
+                              className="number-pill"
+                            >
+                              {code}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="bible-preview-reference">
+                        {previewBiblePassage.translationName}
+                      </div>
+
+                      <div className="bible-preview-selection-language">
+                        Reference language:{' '}
+                        <strong>
+                          {selectedReferenceBibleTranslation
+                            ? `${selectedReferenceBibleTranslation.name} (${selectedReferenceBibleTranslation.code})`
+                            : referenceBibleTranslationCode}
+                        </strong>
+                      </div>
                     </div>
 
-                    <div className="bible-preview-verses">
+                    <AppScrollArea
+                      className="bible-preview-verses-shell"
+                      viewportClassName="bible-preview-verses"
+                      dependencyKey={`${previewBiblePassage.reference}-${previewBiblePassage.verses.length}-${previewBiblePassage.translationCode}`}
+                    >
                       {previewBiblePassage.verses.map(
                         (verse) => (
                           <p
@@ -8850,31 +10886,53 @@ function App() {
                               {
                                 verse.verseNumber
                               }
-                            </strong>{' '}
-                            {verse.text}
+                            </strong>
+
+                            {previewBiblePassage.projectionMode ===
+                            BIBLE_PROJECTION_MODES.FRENCH_ENGLISH ? (
+                              <span className="bible-preview-verse-stack">
+                                <span className="bible-preview-verse-text">
+                                  {
+                                    verse.primaryText
+                                  }
+                                </span>
+                                <span className="bible-preview-verse-text secondary">
+                                  {
+                                    verse.secondaryText
+                                  }
+                                </span>
+                              </span>
+                            ) : (
+                              <span className="bible-preview-verse-text">
+                                {verse.text}
+                              </span>
+                            )}
                           </p>
                         )
                       )}
-                    </div>
+                    </AppScrollArea>
 
-                    <div className="bible-selection-actions">
-                      <button
-                        className="button button-primary"
-                        onClick={
-                          projectBiblePassage
-                        }
-                      >
-                        Send to Projector
-                      </button>
+                    <div className="bible-preview-action-bar">
+                      <div className="bible-live-control-header">
+                        <div>
+                          <p className="card-kicker">
+                            Live Bible Controls
+                          </p>
 
-                      {isBibleProjectionActive && (
-                        <>
+                          <strong className="bible-live-current-reference">
+                            {liveBibleReference ||
+                              previewBiblePassage.reference}
+                          </strong>
+                        </div>
+
+                        <div className="bible-live-nav-buttons">
                           <button
                             className="button button-secondary"
                             onClick={
                               previousSection
                             }
                             disabled={
+                              !isBibleProjectionActive ||
                               !canGoToPreviousProjection
                             }
                           >
@@ -8885,49 +10943,111 @@ function App() {
                             className="button button-secondary"
                             onClick={nextSection}
                             disabled={
+                              !isBibleProjectionActive ||
                               !canGoToNextProjection
                             }
                           >
                             Next Verse →
                           </button>
+                        </div>
+                      </div>
 
+                      <div className="bible-preview-action-layout">
+                        <div className="bible-projection-mode-control">
+                          <p className="small-title">
+                            Projection Language
+                          </p>
+
+                          <div className="bible-projection-mode-pills">
+                            {BIBLE_PROJECTION_LANGUAGE_OPTIONS.map(
+                              (option) => (
+                                <button
+                                  key={option.value}
+                                  type="button"
+                                  className={[
+                                    'bible-projection-mode-pill',
+                                    bibleProjectionMode ===
+                                    option.value
+                                      ? 'active'
+                                      : '',
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' ')}
+                                  onClick={() =>
+                                    handleBibleProjectionModeChange(
+                                      option.value
+                                    )
+                                  }
+                                >
+                                  {option.label}
+                                </button>
+                              )
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="bible-selection-actions bible-preview-actions">
                           <button
-                            className="button button-secondary"
+                            className="button button-primary"
                             onClick={
-                              returnToSongProjection
+                              projectBiblePassage
                             }
                           >
-                            Return to Song
+                            {isBibleProjectionActive
+                              ? 'Update Projector'
+                              : 'Send to Projector'}
                           </button>
-                        </>
-                      )}
-                    </div>
 
-                    {isBibleProjectionActive &&
-                      currentBibleVerse && (
-                        <p className="inline-note bible-live-note">
-                          Projecting verse{' '}
-                          <strong>
-                            {
-                              currentBibleVerse.verseNumber
-                            }
-                          </strong>{' '}
-                          from{' '}
-                          <strong>
-                            {
-                              projectedBiblePassage.reference
-                            }
-                          </strong>
-                          .
-                        </p>
-                      )}
+                          {isBibleProjectionActive && (
+                            <>
+                              <button
+                                className="button button-secondary"
+                                onClick={
+                                  returnToSongProjection
+                                }
+                              >
+                                Return to Song
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {isBibleProjectionActive &&
+                        currentBibleVerse && (
+                          <p className="inline-note bible-live-note">
+                            Projecting{' '}
+                            <strong>
+                              {liveBibleReference}
+                            </strong>{' '}
+                            using{' '}
+                            <strong>
+                              {
+                                projectedBiblePassage.translationName
+                              }
+                            </strong>
+                            .
+                          </p>
+                        )}
+                    </div>
                   </>
                 ) : (
-                  <div className="empty-state">
-                    Preview a Bible passage to
-                    review it before
-                    projection.
-                  </div>
+                  <>
+                    <div className="card-header bible-preview-card-header">
+                      <div>
+                        <p className="card-kicker">
+                          Passage Preview
+                        </p>
+
+                        <h3>Choose a passage</h3>
+                      </div>
+                    </div>
+
+                    <div className="empty-state bible-preview-empty">
+                      Preview a Bible passage to
+                      review it before projection.
+                    </div>
+                  </>
                 )}
               </section>
             </div>
@@ -9044,7 +11164,11 @@ function App() {
                   ))}
                 </div>
 
-                <div className="song-list">
+                <AppScrollArea
+                  className="song-list-shell"
+                  viewportClassName="song-list"
+                  dependencyKey={`songs-admin-${filteredSongs.length}-${typeFilter}-${search}`}
+                >
                   {filteredSongs.map((song) => (
                     <button
                       key={song.id}
@@ -9107,7 +11231,7 @@ function App() {
                       No songs match this search.
                     </div>
                   )}
-                </div>
+                </AppScrollArea>
               </section>
 
               <section className="console-card song-detail-card">
@@ -9142,7 +11266,11 @@ function App() {
                   )}
                 </div>
 
-                <div className="song-detail-body">
+                <AppScrollArea
+                  className="song-detail-body-shell"
+                  viewportClassName="song-detail-body"
+                  dependencyKey={`song-detail-${selectedSongResolved?.id || 'none'}-${selectedSongUsageCount}`}
+                >
                 {selectedSong ? (
                   <>
                     <div className="song-detail-meta">
@@ -9382,6 +11510,121 @@ function App() {
                       )}
                     </div>
 
+                    <div className="melody-reference-card">
+                      <div className="melody-reference-header">
+                        <strong>
+                          Song Melody Reference
+                        </strong>
+
+                        {selectedSongMelodyReference ? (
+                          <span>
+                            {getMelodyReferenceSummary(
+                              selectedSongMelodyReference
+                            )}
+                          </span>
+                        ) : (
+                          <span>
+                            No melody reference uploaded
+                          </span>
+                        )}
+                      </div>
+
+                      <input
+                        ref={
+                          melodyReferenceInputRef
+                        }
+                        type="file"
+                        accept=".mp3,.m4a,.wav,audio/mpeg,audio/mp4,audio/x-m4a,audio/wav,audio/wave"
+                        className="background-upload-input"
+                        onChange={
+                          handleMelodyReferenceFileSelected
+                        }
+                      />
+
+                      {isLoadingSelectedSongMelodyReference ? (
+                        <div className="inline-note">
+                          Loading melody reference…
+                        </div>
+                      ) : selectedSongMelodyReference ? (
+                        <>
+                          <div className="melody-reference-actions">
+                            <button
+                              type="button"
+                              className="button button-secondary button-compact"
+                              onClick={
+                                playSelectedSongMelodyReference
+                              }
+                            >
+                              ▶ Play Reference
+                            </button>
+
+                            <button
+                              type="button"
+                              className="button button-secondary button-compact"
+                              onClick={
+                                openMelodyReferenceFilePicker
+                              }
+                            >
+                              Replace
+                            </button>
+
+                            <button
+                              type="button"
+                              className="button button-danger button-compact"
+                              onClick={
+                                deleteSelectedSongMelodyReference
+                              }
+                            >
+                              Delete
+                            </button>
+                          </div>
+
+                          <audio
+                            ref={
+                              melodyReferenceAudioRef
+                            }
+                            className="melody-reference-audio"
+                            controls
+                            preload="none"
+                            src={getMelodyReferenceAudioUrl(
+                              selectedSongMelodyReference
+                            )}
+                          />
+
+                          <p className="melody-reference-meta">
+                            {selectedSongMelodyReference.originalFilename}
+                            {' · '}
+                            {getLanguageLabel(
+                              selectedSongMelodyReference.language
+                            )}
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="melody-reference-copy">
+                            Upload a local MP3, M4A,
+                            or WAV sample that helps
+                            singers understand the
+                            melody, rhythm, phrasing,
+                            and lyric placement. Up
+                            to 25 MB.
+                          </p>
+
+                          <div className="melody-reference-actions">
+                            <button
+                              type="button"
+                              className="button button-secondary button-compact"
+                              onClick={
+                                openMelodyReferenceFilePicker
+                              }
+                            >
+                              Upload Reference
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
                     <div className="song-lyrics-preview">
                       {selectedSongResolved.lyrics ||
                         'No lyrics added yet.'}
@@ -9415,7 +11658,7 @@ function App() {
                     </div>
                   </>
                 )}
-                </div>
+                </AppScrollArea>
               </section>
             </div>
           </div>
@@ -9504,7 +11747,11 @@ function App() {
                   </button>
                 </div>
 
-                <div className="playlist-management-list">
+                <AppScrollArea
+                  className="playlist-management-list-shell"
+                  viewportClassName="playlist-management-list"
+                  dependencyKey={`playlists-${filteredManagedPlaylists.length}-${playlistSearch}-${managedPlaylistId || 'none'}`}
+                >
                   {filteredManagedPlaylists.map(
                     (playlist) => (
                     <button
@@ -9562,7 +11809,7 @@ function App() {
                       search.
                     </div>
                   )}
-                </div>
+                </AppScrollArea>
               </section>
 
               <section className="console-card playlist-detail-card">
@@ -9746,7 +11993,11 @@ function App() {
                           Playlist Songs
                         </p>
 
-                        <div className="service-song-list playlist-songs-list">
+                        <AppScrollArea
+                          className="playlist-songs-list-shell"
+                          viewportClassName="service-song-list playlist-songs-list"
+                          dependencyKey={`managed-playlist-songs-${managedPlaylist?.id || 'none'}-${managedPlaylistSongs.length}`}
+                        >
                           {managedPlaylistSongs.map(
                             (song, index) => (
                               <div
@@ -9829,7 +12080,7 @@ function App() {
                               empty.
                             </div>
                           )}
-                        </div>
+                        </AppScrollArea>
                       </div>
 
                       <div className="playlist-library-panel">
@@ -9880,7 +12131,11 @@ function App() {
                           ))}
                         </div>
 
-                        <div className="song-list playlist-library-song-list">
+                        <AppScrollArea
+                          className="playlist-library-song-list-shell"
+                          viewportClassName="song-list playlist-library-song-list"
+                          dependencyKey={`playlist-library-${managedPlaylist?.id || 'none'}-${filteredSongs.length}-${search}-${typeFilter}`}
+                        >
                           {filteredSongs.map(
                             (song) => {
                               const alreadyInPlaylist =
@@ -9974,7 +12229,7 @@ function App() {
                               search.
                             </div>
                           )}
-                        </div>
+                        </AppScrollArea>
                       </div>
                     </div>
                   </>
@@ -10049,7 +12304,11 @@ function App() {
                   </span>
                 </div>
 
-                <div className="playlist-management-list service-history-list">
+                <AppScrollArea
+                  className="playlist-management-list-shell"
+                  viewportClassName="playlist-management-list service-history-list"
+                  dependencyKey={`history-${completedServiceHistory.length}-${selectedHistoryServicePlanId || 'none'}`}
+                >
                   {completedServiceHistory.map(
                     (servicePlan) => (
                       <div
@@ -10166,7 +12425,7 @@ function App() {
                       save it here.
                     </div>
                   )}
-                </div>
+                </AppScrollArea>
               </section>
 
               <section className="console-card playlist-detail-card">
@@ -10264,7 +12523,11 @@ function App() {
                           Songs Used
                         </p>
 
-                        <div className="service-song-list playlist-songs-list">
+                        <AppScrollArea
+                          className="playlist-songs-list-shell"
+                          viewportClassName="service-song-list playlist-songs-list"
+                          dependencyKey={`history-songs-${selectedHistoryServicePlan?.id || 'none'}-${(selectedHistoryServicePlan?.songs || []).filter((song) => song != null).length}`}
+                        >
                           {(
                             selectedHistoryServicePlan.songs ||
                             []
@@ -10299,7 +12562,7 @@ function App() {
                                 </div>
                               )
                             )}
-                        </div>
+                        </AppScrollArea>
                       </div>
                     </div>
                   ) : (

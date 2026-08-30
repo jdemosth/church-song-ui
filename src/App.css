@@ -215,7 +215,30 @@ button:disabled {
 
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
+  scrollbar-color: #aab9cd #e9eff7;
+}
+
+.main-area::-webkit-scrollbar {
+  width: 12px;
+}
+
+.main-area::-webkit-scrollbar-track {
+  background: #e9eff7;
+  border-left: 1px solid #d6dfeb;
+}
+
+.main-area::-webkit-scrollbar-thumb {
+  background: #aab9cd;
+  border-radius: 999px;
+  border: 2px solid #e9eff7;
+}
+
+.main-area::-webkit-scrollbar-thumb:hover {
+  background: #90a3bc;
 }
 
 .operator-view {
@@ -230,7 +253,7 @@ button:disabled {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
 }
 
 /* HEADER */
@@ -435,15 +458,33 @@ button:disabled {
     minmax(280px, 0.9fr)
     minmax(360px, 1.1fr);
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
+  flex: 1;
+  height: 100%;
+  max-height: 100%;
   min-height: 0;
+  overflow: hidden;
 }
 
 .bible-selection-card,
 .bible-preview-card {
   display: flex;
   flex-direction: column;
+  height: 100%;
+  max-height: 100%;
   min-height: 0;
+}
+
+.bible-grid > * {
+  min-height: 0;
+}
+
+.bible-selection-card {
+  overflow: auto;
+}
+
+.bible-preview-card {
+  overflow: hidden;
 }
 
 .bible-form-grid {
@@ -457,6 +498,10 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.bible-reference-language-field {
+  grid-column: 1 / -1;
 }
 
 .bible-form-field span {
@@ -475,6 +520,29 @@ button:disabled {
   color: var(--text);
 }
 
+.bible-reference-language-pills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bible-reference-language-pill {
+  padding: 9px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #59667a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.bible-reference-language-pill.active {
+  background: #eef4ff;
+  color: var(--blue);
+  border-color: var(--blue);
+}
+
 .bible-selection-actions {
   display: flex;
   align-items: center;
@@ -487,17 +555,46 @@ button:disabled {
   color: var(--text-muted);
   font-size: 14px;
   font-weight: 600;
-  margin-bottom: 14px;
+  margin-bottom: 0;
+}
+
+.bible-preview-selection-language {
+  margin-top: 8px;
+  color: #6e7b8f;
+  font-size: 12px;
+}
+
+.bible-preview-sticky-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -18px -18px 0;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid #e3eaf3;
+  background: #ffffff;
+}
+
+.bible-preview-card-header {
+  margin-bottom: 10px;
+}
+
+.bible-preview-code-list {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .bible-preview-verses {
   flex: 1;
   min-height: 0;
-  overflow: auto;
-  border: 1px solid #e3eaf3;
-  border-radius: 16px;
-  background: #f8fbff;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  margin: 0 -18px;
   padding: 18px;
+  background: #f8fbff;
 }
 
 .bible-preview-verse {
@@ -506,12 +603,116 @@ button:disabled {
   line-height: 1.65;
 }
 
+.bible-preview-verse strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.bible-preview-verse-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bible-preview-verse-text {
+  display: block;
+}
+
+.bible-preview-verse-text.secondary {
+  padding-top: 10px;
+  border-top: 1px solid #dce5f1;
+  color: #50617a;
+}
+
 .bible-preview-verse + .bible-preview-verse {
   margin-top: 14px;
 }
 
+.bible-preview-action-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin: 0 -18px -18px;
+  padding: 14px 18px 18px;
+  border-top: 1px solid #e3eaf3;
+  background: #ffffff;
+}
+
+.bible-live-control-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.bible-live-current-reference {
+  display: block;
+  margin-top: 8px;
+  color: #22314a;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.bible-live-nav-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bible-preview-actions {
+  margin-top: 0;
+}
+
+.bible-preview-action-layout {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.bible-projection-mode-control {
+  min-width: 0;
+}
+
+.bible-projection-mode-pills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bible-projection-mode-pill {
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #59667a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.bible-projection-mode-pill.active {
+  background: #eef4ff;
+  color: var(--blue);
+  border-color: var(--blue);
+}
+
 .bible-live-note {
-  margin-top: 14px;
+  margin: 12px 0 0;
+}
+
+.bible-preview-empty {
+  flex: 1;
+  min-height: 0;
+}
+
+.bible-view {
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
 }
 
 .screen-reference {
@@ -709,6 +910,10 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.service-song-list-shell {
+  height: 100%;
 }
 
 .service-song {
@@ -911,14 +1116,82 @@ button:disabled {
   flex-direction: column;
   min-height: 0;
   height: 100%;
+  overflow: hidden;
 }
 
-.library-card .song-list,
-.service-card .service-song-list {
-  flex: 1;
+.song-list-shell,
+.service-song-list-shell,
+.song-detail-body-shell,
+.playlist-management-list-shell,
+.playlist-songs-list-shell,
+.playlist-library-song-list-shell,
+.bible-preview-verses-shell {
+  flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
+}
+
+.app-scroll-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 12px;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.app-scrollable {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   padding-right: 4px;
+}
+
+.app-scrollable::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.app-scrollbar {
+  position: relative;
+  width: 12px;
+  min-height: 0;
+  border-radius: 999px;
+  background: rgba(33, 52, 84, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(150, 166, 191, 0.2);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+  cursor: default;
+}
+
+.app-scrollbar.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.app-scrollbar-thumb {
+  position: absolute;
+  left: 0;
+  width: 12px;
+  min-height: 40px;
+  border-radius: 999px;
+  background: rgba(70, 90, 125, 0.68);
+  border: 2px solid rgba(233, 239, 247, 0.95);
+  background-clip: padding-box;
+  cursor: default;
+}
+
+.app-scrollbar-thumb:hover {
+  background: rgba(70, 90, 125, 0.85);
+  background-clip: padding-box;
+}
+
+.app-scrollbar-thumb.dragging {
+  background: rgba(70, 90, 125, 0.95);
+  background-clip: padding-box;
 }
 
 .current-song-card {
@@ -944,6 +1217,77 @@ button:disabled {
   color: #8993a3;
 
   font-size: 13px;
+}
+
+.learning-mode-panel {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #e6eaf0;
+  border-radius: 12px;
+  background: #f9fbfd;
+}
+
+.learning-mode-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.learning-mode-copy-wrap {
+  min-width: 0;
+}
+
+.learning-mode-copy {
+  margin: 0;
+  color: #7b8596;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.learning-mode-note {
+  margin: 12px 0 0;
+}
+
+.learning-audio-player {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.learning-audio-element {
+  display: none;
+}
+
+.learning-audio-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.learning-audio-timeline {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  color: #5f6d81;
+  font-size: 12px;
+}
+
+.learning-audio-volume {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  color: #5f6d81;
+  font-size: 12px;
+}
+
+.learning-audio-timeline input,
+.learning-audio-volume input {
+  width: 100%;
+  min-width: 0;
 }
 
 .current-song-controls {
@@ -1100,6 +1444,10 @@ button:disabled {
     grid-template-columns: minmax(0, 1fr);
     gap: 12px;
   }
+
+  .learning-mode-header {
+    flex-direction: column;
+  }
 }
 
 .current-actions .button {
@@ -1252,6 +1600,7 @@ button:disabled {
 .screen-content {
   width: 100%;
   height: 100%;
+  min-height: 0;
 
   display: flex;
 
@@ -1261,9 +1610,19 @@ button:disabled {
   justify-content: center;
 }
 
+.screen-content-song {
+  justify-content: center;
+}
+
+.screen-content-bible {
+  justify-content: stretch;
+  gap: 6px;
+}
+
 .lyrics-fit-container {
   width: 100%;
   height: 82%;
+  min-height: 0;
 
   display: flex;
 
@@ -1278,6 +1637,11 @@ button:disabled {
 .lyrics-fit-container-projector {
   height: 90%;
   padding: 0;
+}
+
+.lyrics-fit-container-bible {
+  flex: 1 1 auto;
+  height: auto;
 }
 
 .screen-lyrics {
@@ -1512,48 +1876,6 @@ button:disabled {
 
   color: #7d8797;
   font-size: 12px;
-}
-
-.song-library-card .song-list,
-.library-card .song-list,
-.service-card .service-song-list,
-.playlist-management-list,
-.playlist-songs-list,
-.playlist-library-song-list,
-.song-detail-body {
-  scrollbar-width: thin;
-  scrollbar-color: #c2cedd transparent;
-}
-
-.song-library-card .song-list::-webkit-scrollbar,
-.library-card .song-list::-webkit-scrollbar,
-.service-card .service-song-list::-webkit-scrollbar,
-.playlist-management-list::-webkit-scrollbar,
-.playlist-songs-list::-webkit-scrollbar,
-.playlist-library-song-list::-webkit-scrollbar,
-.song-detail-body::-webkit-scrollbar {
-  width: 8px;
-}
-
-.song-library-card .song-list::-webkit-scrollbar-thumb,
-.library-card .song-list::-webkit-scrollbar-thumb,
-.service-card .service-song-list::-webkit-scrollbar-thumb,
-.playlist-management-list::-webkit-scrollbar-thumb,
-.playlist-songs-list::-webkit-scrollbar-thumb,
-.playlist-library-song-list::-webkit-scrollbar-thumb,
-.song-detail-body::-webkit-scrollbar-thumb {
-  background: #c2cedd;
-  border-radius: 999px;
-}
-
-.song-library-card .song-list::-webkit-scrollbar-track,
-.library-card .song-list::-webkit-scrollbar-track,
-.service-card .service-song-list::-webkit-scrollbar-track,
-.playlist-management-list::-webkit-scrollbar-track,
-.playlist-songs-list::-webkit-scrollbar-track,
-.playlist-library-song-list::-webkit-scrollbar-track,
-.song-detail-body::-webkit-scrollbar-track {
-  background: transparent;
 }
 
 .blocked-delete-copy {
@@ -2156,6 +2478,43 @@ button:disabled {
   background: #f9fbfd;
 }
 
+.melody-reference-card {
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid #e6eaf0;
+  border-radius: 12px;
+  background: #f9fbfd;
+}
+
+.melody-reference-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: #556376;
+  font-size: 12px;
+}
+
+.melody-reference-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.melody-reference-audio {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.melody-reference-copy,
+.melody-reference-meta {
+  margin: 0 0 10px;
+  color: #667489;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .translation-availability-header {
   display: flex;
   align-items: center;
@@ -2682,6 +3041,13 @@ button:disabled {
 @media (max-width: 1280px) {
   .bible-grid {
     grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .bible-live-control-header,
+  .bible-preview-action-layout {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .sidebar {
@@ -2749,6 +3115,19 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
+  .bible-grid {
+    overflow: auto;
+  }
+
+  .bible-projection-mode-pills {
+    width: 100%;
+  }
+
+  .bible-projection-mode-pill {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+
   .console-grid {
     grid-template-columns:
       minmax(0, 1fr)
@@ -2803,7 +3182,8 @@ button:disabled {
 
   .main-area {
     padding: 18px;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: scroll;
   }
 
   .service-header {
