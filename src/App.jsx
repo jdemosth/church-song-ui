@@ -1451,6 +1451,24 @@ function getValidSongFamilyId(song) {
     : null
 }
 
+function isSameProjectionSong(leftSong, rightSong) {
+  if (!leftSong || !rightSong) {
+    return false
+  }
+
+  if (leftSong.id === rightSong.id) {
+    return true
+  }
+
+  const leftFamilyId = getValidSongFamilyId(leftSong)
+  const rightFamilyId = getValidSongFamilyId(rightSong)
+
+  return (
+    leftFamilyId != null &&
+    leftFamilyId === rightFamilyId
+  )
+}
+
 function resolveLanguageVersionsForSong(
   song,
   songs,
@@ -3155,6 +3173,10 @@ function App() {
   const [currentSong, setCurrentSong] =
     useState(null)
   const [
+    currentSongSectionIndex,
+    setCurrentSongSectionIndex,
+  ] = useState(0)
+  const [
     pendingSongsScrollId,
     setPendingSongsScrollId,
   ] = useState(null)
@@ -3384,10 +3406,15 @@ function App() {
   ] = useState(null)
   const projectorChannelRef = useRef(null)
   const projectorWindowRef = useRef(null)
+  const operatorContentViewportRef = useRef(null)
+  const playlistSelectorRef = useRef(null)
   const backgroundInputRef = useRef(null)
   const learningAudioRef = useRef(null)
   const melodyReferenceInputRef = useRef(null)
   const melodyReferenceAudioRef = useRef(null)
+  const melodyReferenceRequestsRef = useRef(
+    new Map()
+  )
   const lastSongProjectionRef = useRef(null)
   const previousVisibleModeRef = useRef('LIVE')
   const latestProjectorStateRef = useRef(
@@ -3618,6 +3645,7 @@ function App() {
     setCurrentSongLanguageNotice('')
     setSelectedSong(null)
     setCurrentSong(null)
+    setCurrentSongSectionIndex(0)
     setCurrentSongSourceId(null)
     setProjectionSong(null)
     setSectionIndex(0)
@@ -3628,6 +3656,100 @@ function App() {
     )
     setCustomBackgroundId(null)
     setCustomBackgroundName('')
+  }
+
+  function resolveOperatorPreviewSong(
+    song,
+    { applySessionDefaults = false } = {}
+  ) {
+    if (!song) {
+      return null
+    }
+
+    const resolvedSong =
+      songs.find(
+        (candidate) =>
+          candidate.id === song.id
+      ) || song
+
+    if (!applySessionDefaults) {
+      return resolvedSong
+    }
+
+    return resolvePreferredLanguageSong(
+      resolvedSong,
+      appSettings.defaultLanguage,
+      songs,
+      familyVersionsByFamilyId
+    )
+  }
+
+  function setOperatorPreviewSong(
+    song,
+    {
+      currentSectionIndex = 0,
+      sourceSongId = song?.id ?? null,
+    } = {}
+  ) {
+    setCurrentSongLanguageNotice('')
+    setSelectedSong(song)
+    setCurrentSong(song)
+    setCurrentSongSectionIndex(
+      song ? currentSectionIndex : 0
+    )
+    setCurrentSongSourceId(sourceSongId)
+  }
+
+  function prepareOperatorPreviewForPlaylist(
+    playlist
+  ) {
+    const playlistSongs =
+      (playlist?.songs || []).filter(
+        (song) => song != null
+      )
+    const firstPlaylistSong =
+      playlistSongs[0] || null
+
+    if (!firstPlaylistSong) {
+      setOperatorPreviewSong(null)
+      return
+    }
+
+    selectPlaylistSong(firstPlaylistSong)
+  }
+
+  function clearLiveProjectionForPlaylistSwitch() {
+    setProjectionContentType(
+      PROJECTION_CONTENT_TYPES.SONG
+    )
+    setProjectionSong(null)
+    setSectionIndex(0)
+    setProjectedBiblePassage(null)
+    setProjectedBibleVerseIndex(0)
+    setProjectionMode('CLEAR')
+    lastSongProjectionRef.current = null
+  }
+
+  function releasePlaylistSelectorFocus() {
+    if (
+      typeof document === 'undefined' ||
+      document.activeElement !==
+        playlistSelectorRef.current
+    ) {
+      return
+    }
+
+    playlistSelectorRef.current.blur()
+  }
+
+  function activatePlaylistInConsole(
+    playlist
+  ) {
+    setSelectedPlaylist(playlist)
+    setLoadedServicePlanId(null)
+    prepareOperatorPreviewForPlaylist(playlist)
+    clearLiveProjectionForPlaylistSwitch()
+    releasePlaylistSelectorFocus()
   }
 
   async function saveApplicationSettings() {
@@ -3786,6 +3908,32 @@ function App() {
       if (command === 'CLEAR') {
         toggleClearLyrics()
       }
+    }
+  )
+
+  const scrollOperatorContent = useEffectEvent(
+    (direction) => {
+      const viewport =
+        operatorContentViewportRef.current
+
+      if (
+        activeView !== 'operator' ||
+        !viewport
+      ) {
+        return false
+      }
+
+      const scrollAmount = Math.max(
+        96,
+        Math.min(viewport.clientHeight * 0.35, 240)
+      )
+
+      viewport.scrollBy({
+        top: direction * scrollAmount,
+        behavior: 'smooth',
+      })
+
+      return true
     }
   )
 
@@ -4281,14 +4429,46 @@ function App() {
     }
   }
 
+  async function fetchMelodyReference(songId) {
+    const existingRequest =
+      melodyReferenceRequestsRef.current.get(songId)
+
+    if (existingRequest) {
+      return existingRequest
+    }
+
+    const request = fetch(
+      `http://localhost:8080/songs/${songId}/melody-reference`
+    )
+      .then(async (response) => {
+        if (response.status === 204) {
+          return null
+        }
+
+        if (!response.ok) {
+          const message = await readErrorMessage(response)
+          throw new Error(
+            message || 'Could not load the melody reference.'
+          )
+        }
+
+        return response.json()
+      })
+      .catch((err) => {
+        melodyReferenceRequestsRef.current.delete(songId)
+        throw err
+      })
+
+    melodyReferenceRequestsRef.current.set(songId, request)
+    return request
+  }
+
   async function loadCurrentSongLearningReference(
     songId = currentSongResolved?.id
   ) {
     if (!songId) {
       setCurrentSongLearningReference(null)
-      setIsLoadingCurrentSongLearningReference(
-        false
-      )
+      setIsLoadingCurrentSongLearningReference(false)
       return
     }
 
@@ -4297,26 +4477,7 @@ function App() {
         true
       )
 
-      const response = await fetch(
-        `http://localhost:8080/songs/${songId}/melody-reference`
-      )
-
-      if (response.status === 404) {
-        setCurrentSongLearningReference(null)
-        return
-      }
-
-      if (!response.ok) {
-        const message =
-          await readErrorMessage(response)
-
-        throw new Error(
-          message ||
-            'Could not load the reference audio.'
-        )
-      }
-
-      const data = await response.json()
+      const data = await fetchMelodyReference(songId)
       setCurrentSongLearningReference(data)
     } catch (err) {
       setCurrentSongLearningReference(null)
@@ -4358,26 +4519,7 @@ function App() {
         true
       )
 
-      const response = await fetch(
-        `http://localhost:8080/songs/${songId}/melody-reference`
-      )
-
-      if (response.status === 404) {
-        setSelectedSongMelodyReference(null)
-        return
-      }
-
-      if (!response.ok) {
-        const message =
-          await readErrorMessage(response)
-
-        throw new Error(
-          message ||
-            'Could not load the song melody reference.'
-        )
-      }
-
-      const data = await response.json()
+      const data = await fetchMelodyReference(songId)
       setSelectedSongMelodyReference(data)
     } catch (err) {
       setSelectedSongMelodyReference(null)
@@ -4813,7 +4955,7 @@ function App() {
       ) {
         lastSongProjectionRef.current = {
           song:
-            previewSong ||
+            liveProjectionSong ||
             currentSongResolved ||
             null,
           sectionIndex,
@@ -4971,6 +5113,17 @@ function App() {
           null
         )
       })
+      setCurrentSong((current) => {
+        if (!current) {
+          return null
+        }
+
+        return (
+          data.find(
+            (song) => song.id === current.id
+          ) || current
+        )
+      })
     } catch (err) {
       if (
         err instanceof TypeError &&
@@ -5007,22 +5160,32 @@ function App() {
       )
       const defaultPlaylist =
         reusablePlaylistList[0] || data[0] || null
+      const currentSelectedPlaylistId =
+        selectedPlaylist?.id || null
+      const nextSelectedPlaylist =
+        currentSelectedPlaylistId == null
+          ? defaultPlaylist
+          : data.find(
+              (playlist) =>
+                playlist.id ===
+                currentSelectedPlaylistId
+            ) || defaultPlaylist
+      const selectedPlaylistChanged =
+        nextSelectedPlaylist?.id !==
+        currentSelectedPlaylistId
 
       setPlaylists(data)
 
-      setSelectedPlaylist((current) => {
-        if (!current) {
-          return defaultPlaylist
-        }
+      setSelectedPlaylist(nextSelectedPlaylist)
 
-        return (
-          data.find(
-            (playlist) =>
-              playlist.id === current.id
-          ) ||
-          defaultPlaylist
+      if (
+        loadedServicePlanId == null &&
+        selectedPlaylistChanged
+      ) {
+        prepareOperatorPreviewForPlaylist(
+          nextSelectedPlaylist
         )
-      })
+      }
 
       setOpenedPlaylistId((current) => {
         if (current == null) {
@@ -5410,18 +5573,21 @@ function App() {
     ) ||
     completedServiceHistory[0] ||
     null
-  const loadedServicePlanReuseSource =
-    loadedServicePlan == null
-      ? null
-      : completedServiceHistory.find(
-          (servicePlan) =>
-            servicePlan.id ===
-            reusedServiceSourceById[
-              loadedServicePlan.id
-            ]
-        ) || null
+  const consoleReuseSource =
+    completedServiceHistory.find(
+      (servicePlan) =>
+        servicePlan.id ===
+        (selectedPlaylist?.sourceServicePlanId ??
+          (loadedServicePlan == null
+            ? null
+            : reusedServiceSourceById[
+                loadedServicePlan.id
+              ]))
+    ) || null
   const usingLoadedServicePlan =
     loadedServicePlan != null
+  const usingWorkingPlaylist =
+    selectedPlaylist?.reusable === false
   const consoleCollectionLabel =
     usingLoadedServicePlan
       ? formatServiceOccurrenceName(
@@ -5434,7 +5600,8 @@ function App() {
       loadedServicePlan
     )
   const consoleCollectionTypeLabel =
-    usingLoadedServicePlan
+    usingLoadedServicePlan ||
+    usingWorkingPlaylist
       ? 'Working Service'
       : 'Service Playlist'
   const completableServiceTarget =
@@ -5593,6 +5760,15 @@ function App() {
       ),
     [currentSong, songs]
   )
+  const currentSongSections = useMemo(() => {
+    if (!currentSongResolved) {
+      return []
+    }
+
+    return parseLyricsSections(
+      currentSongResolved
+    )
+  }, [currentSongResolved])
   const projectionSongResolved = useMemo(
     () =>
       resolveSongFromCollection(
@@ -5601,6 +5777,18 @@ function App() {
       ),
     [projectionSong, songs]
   )
+  const liveProjectionSong =
+    previewProjectionContentType ===
+    PROJECTION_CONTENT_TYPES.SONG
+      ? projectionSongResolved
+      : null
+  const isCurrentSongLive =
+    projectionContentType ===
+      PROJECTION_CONTENT_TYPES.SONG &&
+    isSameProjectionSong(
+      liveProjectionSong,
+      currentSongResolved
+    )
 
   function openSongsAdministration() {
     const targetSongId =
@@ -5628,12 +5816,6 @@ function App() {
     setActiveView('songs')
   }
 
-  const previewSong =
-    previewProjectionContentType ===
-    PROJECTION_CONTENT_TYPES.SONG
-      ? projectionSongResolved ||
-        currentSongResolved
-      : null
   const currentBibleVerse =
     isBibleProjectionActive
       ? projectedBiblePassage.verses[
@@ -5642,21 +5824,36 @@ function App() {
         projectedBiblePassage.verses[0] ||
         null
       : null
-  const previewSections = useMemo(() => {
-    if (!previewSong) {
+  const stagedProjectorSong = currentSongResolved
+  const stagedProjectorContentType =
+    stagedProjectorSong
+      ? PROJECTION_CONTENT_TYPES.SONG
+      : previewProjectionContentType
+  const stagedProjectorSectionIndex =
+    currentSongSectionIndex
+  const stagedProjectorPreviewMode =
+    stagedProjectorSong ? 'LIVE' : projectionMode
+  const projectorPreviewSections = useMemo(() => {
+    if (!stagedProjectorSong) {
       return []
     }
 
-    return parseLyricsSections(previewSong)
-  }, [previewSong])
-  const currentSection =
-    previewSections[sectionIndex] ||
-    previewSections[0]
+    return parseLyricsSections(stagedProjectorSong)
+  }, [stagedProjectorSong])
+  const projectorPreviewSection =
+    projectorPreviewSections[
+      stagedProjectorSectionIndex
+    ] ||
+    projectorPreviewSections[0]
+  const currentSongSelectionId =
+    currentSongSourceId ??
+    currentSongResolved?.id ??
+    null
   const canGoToPreviousProjection =
     previewProjectionContentType ===
     PROJECTION_CONTENT_TYPES.BIBLE
       ? projectedBibleVerseIndex > 0
-      : sectionIndex > 0
+      : currentSongSectionIndex > 0
   const canGoToNextProjection =
     previewProjectionContentType ===
     PROJECTION_CONTENT_TYPES.BIBLE
@@ -5664,12 +5861,8 @@ function App() {
         (projectedBiblePassage?.verses
           ?.length || 0) -
           1
-      : sectionIndex <
-        previewSections.length - 1
-  const currentSongSelectionId =
-    currentSongSourceId ??
-    currentSongResolved?.id ??
-    null
+      : currentSongSectionIndex <
+        currentSongSections.length - 1
   const liveBibleReference =
     isBibleProjectionActive &&
     currentBibleVerse
@@ -5683,6 +5876,22 @@ function App() {
             bibleSelection.startVerse
           )
         : ''
+
+  useEffect(() => {
+    if (!currentSongResolved) {
+      setCurrentSongSectionIndex(0)
+      return
+    }
+
+    setCurrentSongSectionIndex((current) =>
+      current < currentSongSections.length
+        ? current
+        : 0
+    )
+  }, [
+    currentSongResolved,
+    currentSongSections.length,
+  ])
   const selectedSongFamilyId =
     getValidSongFamilyId(selectedSongResolved)
   const currentSongFamilyId =
@@ -5936,6 +6145,11 @@ function App() {
           `http://localhost:8080/song-families/${familyId}/versions`
         )
 
+        if (response.status === 404) {
+          // A stale family link is optional metadata; keep the base song usable.
+          return
+        }
+
         if (!response.ok) {
           throw new Error(
             'Failed to load language versions'
@@ -6127,7 +6341,7 @@ function App() {
 
     const nextProjectorState =
       createProjectorState({
-        song: previewSong,
+        song: liveProjectionSong,
         sectionIndex,
         projectionContentType,
         biblePassage:
@@ -6162,7 +6376,7 @@ function App() {
     projectionMode,
     projectedBiblePassage,
     projectedBibleVerseIndex,
-    previewSong,
+    liveProjectionSong,
     sectionIndex,
   ])
 
@@ -6840,6 +7054,7 @@ function App() {
       stopMelodyReferencePlayback({
         resetTime: true,
       })
+      melodyReferenceRequestsRef.current.clear()
       setSelectedSongMelodyReference(
         melodyReference
       )
@@ -6894,6 +7109,7 @@ function App() {
       stopMelodyReferencePlayback({
         resetTime: true,
       })
+      melodyReferenceRequestsRef.current.clear()
       setSelectedSongMelodyReference(null)
       setSuccessMessage(
         'Melody reference deleted.'
@@ -7988,10 +8204,12 @@ function App() {
           ) ||
           null
 
-        setSelectedPlaylist(nextPlaylist)
+        activatePlaylistInConsole(
+          nextPlaylist
+        )
+      } else {
+        initializeFreshSessionDefaults()
       }
-
-      initializeFreshSessionDefaults()
       setSuccessMessage(
         `Completed "${completedService.serviceName}" and saved it to Service History.`
       )
@@ -8081,34 +8299,37 @@ function App() {
         )
       }
 
-      const reusedServicePlan =
+      const reusedWorkingPlaylist =
         await response.json()
-      const nextServicePlans =
-        sortServicePlans([
-          ...servicePlans,
-          reusedServicePlan,
-        ])
+      const playlistsResponse = await fetch(
+        'http://localhost:8080/playlists'
+      )
 
-      setServicePlans(nextServicePlans)
-      setOpenedServicePlanId(
-        reusedServicePlan.id
+      if (!playlistsResponse.ok) {
+        throw new Error(
+          'Failed to refresh playlists after reusing service'
+        )
+      }
+
+      const refreshedPlaylists =
+        await playlistsResponse.json()
+      const workingPlaylist =
+        refreshedPlaylists.find(
+          (playlist) =>
+            playlist.id ===
+            reusedWorkingPlaylist.id
+        ) || reusedWorkingPlaylist
+
+      setPlaylists(refreshedPlaylists)
+      setManagedPlaylistId(workingPlaylist.id)
+      setPrioritizedManagedPlaylistId(
+        workingPlaylist.id
       )
-      setLoadedServicePlanId(
-        reusedServicePlan.id
-      )
-      setSelectedPlaylist(null)
-      initializeFreshSessionDefaults()
-      setReusedServiceSourceById(
-        (current) => ({
-          ...current,
-          [reusedServicePlan.id]:
-            selectedHistoryServicePlan.id,
-        })
-      )
+      activatePlaylistInConsole(workingPlaylist)
       setShowReuseServiceModal(false)
       setActiveView('operator')
       setSuccessMessage(
-        `Created a new working service from "${selectedHistoryServicePlan.serviceName}" for ${formatFullDateLabel(reusedServicePlan.serviceDate)}.`
+        `Created a new working service from "${selectedHistoryServicePlan.serviceName}" for ${formatFullDateLabel(workingPlaylist.serviceDate)}.`
       )
     } catch (err) {
       setError(err.message)
@@ -8431,9 +8652,9 @@ function App() {
     setManagedPlaylistId(
       playlistToActivate.id
     )
-    setSelectedPlaylist(playlistToActivate)
-    setLoadedServicePlanId(null)
-    initializeFreshSessionDefaults()
+    activatePlaylistInConsole(
+      playlistToActivate
+    )
     setActiveView('operator')
     setSuccessMessage(
       `Made playlist "${playlistToActivate.name}" active in the Worship Console.`
@@ -8550,8 +8771,9 @@ function App() {
       return
     }
 
-    setSelectedPlaylist(todayWorkingPlaylist)
-    setLoadedServicePlanId(null)
+    activatePlaylistInConsole(
+      todayWorkingPlaylist
+    )
     setShowUseForTodayModal(false)
     setUseForTodaySourcePlaylistId(null)
     setSuccessMessage(
@@ -8617,9 +8839,16 @@ function App() {
           (playlist) =>
             playlist.reusable !== false
         )
+      const nextWorkingPlaylist =
+        refreshedPlaylists.find(
+          (playlist) =>
+            playlist.id === workingPlaylist.id
+        ) || workingPlaylist
 
       setPlaylists(refreshedPlaylists)
-      setSelectedPlaylist(workingPlaylist)
+      activatePlaylistInConsole(
+        nextWorkingPlaylist
+      )
       setOpenedPlaylistId(
         refreshedReusablePlaylists.find(
           (playlist) =>
@@ -8629,8 +8858,6 @@ function App() {
           refreshedReusablePlaylists[0]?.id ||
           null
       )
-      setLoadedServicePlanId(null)
-      initializeFreshSessionDefaults()
       setShowUseForTodayModal(false)
       setUseForTodaySourcePlaylistId(null)
       setSuccessMessage(
@@ -8881,14 +9108,19 @@ function App() {
     }
 
     setCurrentSongLanguageNotice('')
-    setCurrentSong(song)
+    const preparedSong =
+      currentSongResolved || song
+
+    setCurrentSong(preparedSong)
     setProjectionContentType(
       PROJECTION_CONTENT_TYPES.SONG
     )
     setProjectedBiblePassage(null)
     setProjectedBibleVerseIndex(0)
-    setProjectionSong(song)
-    setSectionIndex(0)
+    setProjectionSong(preparedSong)
+    setSectionIndex(
+      currentSongSectionIndex
+    )
     setProjectionMode('LIVE')
   }
 
@@ -8897,35 +9129,18 @@ function App() {
       return
     }
 
-    const resolvedSong =
-      songs.find(
-        (candidate) =>
-          candidate.id === song.id
-      ) || song
     const nextSong =
-      shouldApplySessionDefaults(
-        currentSongSourceId
-      )
-        ? resolvePreferredLanguageSong(
-            resolvedSong,
-            appSettings.defaultLanguage,
-            songs,
-            familyVersionsByFamilyId
-          )
-        : resolvedSong
+      resolveOperatorPreviewSong(song, {
+        applySessionDefaults:
+          shouldApplySessionDefaults(
+            currentSongSourceId
+          ),
+      })
 
-    setCurrentSongLanguageNotice('')
-    setSelectedSong(nextSong)
-    setCurrentSong(nextSong)
-    setCurrentSongSourceId(nextSong.id)
-    setProjectionContentType(
-      PROJECTION_CONTENT_TYPES.SONG
-    )
-    setProjectedBiblePassage(null)
-    setProjectedBibleVerseIndex(0)
-    setProjectionSong(nextSong)
-    setSectionIndex(0)
-    setProjectionMode('LIVE')
+    setOperatorPreviewSong(nextSong, {
+      currentSectionIndex: 0,
+      sourceSongId: song.id,
+    })
   }
 
   function switchCurrentSongLanguage(
@@ -8955,12 +9170,15 @@ function App() {
       findMatchingSectionIndex(
         currentSongResolved,
         resolvedSong,
-        sectionIndex
+        currentSongSectionIndex
       )
 
     setCurrentSongLanguageNotice('')
     setSelectedSong(resolvedSong)
     setCurrentSong(resolvedSong)
+    setCurrentSongSectionIndex(
+      nextSectionIndex
+    )
     setCurrentSongSourceId(
       resolvedSong.id
     )
@@ -9030,18 +9248,7 @@ function App() {
       return
     }
 
-    if (sectionIndex > 0) {
-      setSectionIndex(
-        (current) => current - 1
-      )
-
-      setProjectionMode((currentMode) =>
-        getNavigationProjectionMode(
-          currentMode
-        )
-      )
-      return
-    }
+    moveOperatorPreviewSection(-1)
   }
 
   function nextSection() {
@@ -9068,21 +9275,44 @@ function App() {
       return
     }
 
-    if (
-      sectionIndex <
-      previewSections.length - 1
-    ) {
-      setSectionIndex(
-        (current) => current + 1
-      )
+    moveOperatorPreviewSection(1)
+  }
 
-      setProjectionMode((currentMode) =>
-        getNavigationProjectionMode(
-          currentMode
-        )
-      )
+  function moveOperatorPreviewSection(direction) {
+    const nextSectionIndex =
+      currentSongSectionIndex + direction
+
+    if (
+      nextSectionIndex >= 0 &&
+      nextSectionIndex < currentSongSections.length
+    ) {
+      selectOperatorPreviewSection(nextSectionIndex)
+    }
+  }
+
+  function selectOperatorPreviewSection(
+    nextSectionIndex
+  ) {
+    setCurrentSongSectionIndex(nextSectionIndex)
+
+    if (!isCurrentSongLive) {
       return
     }
+
+    const liveSectionIndex =
+      liveProjectionSong?.id ===
+      currentSongResolved?.id
+        ? nextSectionIndex
+        : findMatchingSectionIndex(
+            currentSongResolved,
+            liveProjectionSong,
+            nextSectionIndex
+          )
+
+    setSectionIndex(liveSectionIndex)
+    setProjectionMode((currentMode) =>
+      getNavigationProjectionMode(currentMode)
+    )
   }
 
   function openProjectorWindow() {
@@ -9092,7 +9322,7 @@ function App() {
 
     const nextProjectorState =
       createProjectorState({
-        song: previewSong,
+        song: liveProjectionSong,
         sectionIndex,
         projectionContentType,
         biblePassage:
@@ -9193,6 +9423,21 @@ function App() {
 
     const handleKeyDown = (event) => {
       if (shouldIgnoreProjectionShortcut(event)) {
+        return
+      }
+
+      if (
+        event.key === 'ArrowDown' ||
+        event.key === 'ArrowUp'
+      ) {
+        const didScroll = scrollOperatorContent(
+          event.key === 'ArrowDown' ? 1 : -1
+        )
+
+        if (didScroll) {
+          event.preventDefault()
+        }
+
         return
       }
 
@@ -9637,6 +9882,7 @@ function App() {
                   playlists.length > 0 && (
                   <div className="service-card-playlist-picker">
                     <select
+                      ref={playlistSelectorRef}
                       className="playlist-select"
                       value={
                         selectedPlaylist?.id ||
@@ -9653,7 +9899,7 @@ function App() {
                               )
                           )
 
-                        setSelectedPlaylist(
+                        activatePlaylistInConsole(
                           playlist
                         )
                       }}
@@ -9676,12 +9922,12 @@ function App() {
                   </div>
                 )}
 
-                {loadedServicePlanReuseSource && (
+                {consoleReuseSource && (
                   <div className="inline-note">
                     Reused from:{' '}
                     <strong>
                       {formatServiceOccurrenceName(
-                        loadedServicePlanReuseSource
+                        consoleReuseSource
                       )}
                     </strong>
                   </div>
@@ -9961,6 +10207,14 @@ function App() {
               </section>
 
               <section className="right-console">
+                <AppScrollArea
+                  className="song-detail-body-shell"
+                  viewportClassName="song-detail-body"
+                  viewportRef={
+                    operatorContentViewportRef
+                  }
+                  dependencyKey={`operator-preview-${currentSongResolved?.id || 'none'}-${previewProjectionContentType}-${projectionMode}`}
+                >
                 <div className="console-card current-song-card">
                   <div className="current-heading">
                     <div>
@@ -9969,31 +10223,37 @@ function App() {
                       </p>
 
                       <h3>
-                        {currentSong?.title ||
+                        {currentSongResolved?.title ||
+                          currentSong?.title ||
                           'Select a song'}
                       </h3>
 
-                      {currentSong && (
+                      {(currentSongResolved ||
+                        currentSong) && (
                         <p className="author">
-                          {currentSong.author ||
+                          {currentSongResolved?.author ||
+                            currentSong?.author ||
                             'Unknown author'}
                         </p>
                       )}
                     </div>
 
                     {getSongTypeBadge(
-                      currentSong?.songType
+                      currentSongResolved?.songType ||
+                        currentSong?.songType
                     ) && (
                       <span
                         className={
                           getSongTypeBadge(
-                            currentSong.songType
+                            currentSongResolved?.songType ||
+                              currentSong?.songType
                           ).className
                         }
                       >
                         {
                           getSongTypeBadge(
-                            currentSong.songType
+                            currentSongResolved?.songType ||
+                              currentSong?.songType
                           ).label
                         }
                       </span>
@@ -10282,9 +10542,7 @@ function App() {
                           </p>
 
                             <div className="section-pills">
-                            {parseLyricsSections(
-                              currentSong
-                            ).map(
+                            {currentSongSections.map(
                               (
                                 section,
                                 index
@@ -10292,38 +10550,14 @@ function App() {
                                 <button
                                   key={`${section.name}-${index}`}
                                   className={
-                                    sectionIndex ===
-                                      index &&
-                                    previewProjectionContentType ===
-                                      PROJECTION_CONTENT_TYPES.SONG
+                                    currentSongSectionIndex ===
+                                    index
                                       ? 'section-pill active'
                                       : 'section-pill'
                                   }
                                   onClick={() => {
-                                    setProjectionContentType(
-                                      PROJECTION_CONTENT_TYPES.SONG
-                                    )
-                                    setProjectedBiblePassage(
-                                      null
-                                    )
-                                    setProjectedBibleVerseIndex(
-                                      0
-                                    )
-                                    setProjectionSong(
-                                      currentSong
-                                    )
-
-                                    setSectionIndex(
+                                    selectOperatorPreviewSection(
                                       index
-                                    )
-
-                                    setProjectionMode(
-                                      (
-                                        currentMode
-                                      ) =>
-                                        getNavigationProjectionMode(
-                                          currentMode
-                                        )
                                     )
                                   }}
                                 >
@@ -10348,19 +10582,19 @@ function App() {
                     </p>
 
                     <strong>
-                      {previewProjectionContentType ===
+                      {stagedProjectorContentType ===
                       PROJECTION_CONTENT_TYPES.BIBLE
                         ? currentBibleVerse
                           ? `${projectedBiblePassage.reference} · Verse ${currentBibleVerse.verseNumber}`
                           : projectedBiblePassage?.reference ||
                             'Bible Passage'
-                        : currentSection?.name ||
+                        : projectorPreviewSection?.name ||
                           'Ready'}
                     </strong>
                   </div>
 
                   <div className="preview-header-actions">
-                    {previewProjectionContentType ===
+                    {stagedProjectorContentType ===
                     PROJECTION_CONTENT_TYPES.BIBLE ? (
                       <div className="current-actions">
                         <button
@@ -10410,10 +10644,12 @@ function App() {
                 </div>
 
                 <ProjectorDisplay
-                  song={previewSong}
-                  sectionIndex={sectionIndex}
+                  song={stagedProjectorSong}
+                  sectionIndex={
+                    stagedProjectorSectionIndex
+                  }
                   projectionContentType={
-                    previewProjectionContentType
+                    stagedProjectorContentType
                   }
                   biblePassage={
                     projectedBiblePassage
@@ -10421,7 +10657,9 @@ function App() {
                   bibleVerseIndex={
                     projectedBibleVerseIndex
                   }
-                  projectionMode={projectionMode}
+                  projectionMode={
+                    stagedProjectorPreviewMode
+                  }
                   backgroundType={backgroundType}
                   backgroundVariant={
                     backgroundVariant
@@ -10615,6 +10853,7 @@ function App() {
                 <p className="projection-shortcuts-hint">
                   Shortcuts: `←` previous, `→` or `Space` next, `B` black, `C` clear lyrics.
                 </p>
+                </AppScrollArea>
               </section>
             </div>
           </div>
@@ -14361,10 +14600,9 @@ Second line`}
                 <button
                   className="button button-primary"
                   onClick={() => {
-                    setSelectedPlaylist(
+                    activatePlaylistInConsole(
                       selectedSongWorkingPlaylists[0]
                     )
-                    setLoadedServicePlanId(null)
                     setShowDeleteBlockedModal(
                       false
                     )

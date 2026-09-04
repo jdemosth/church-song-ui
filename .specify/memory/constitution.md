@@ -1,193 +1,121 @@
 <!--
 Sync Impact Report
-Version change: template -> 1.0.0
+Version change: 1.0.0 -> 2.0.0
 Modified principles:
-- Template principle slot 1 -> I. Workflow Stability First
-- Template principle slot 2 -> II. Incremental Frontend Change
-- Template principle slot 3 -> III. Backward-Compatible UI Behavior
-- Template principle slot 4 -> IV. Backend-Aware UI Contracts
-- Template principle slot 5 -> V. Core Worship Workflow Preservation
-- Added VI. Offline-First Bible Operation
-- Added VII. Multilingual Experience Preservation
-- Added VIII. Clear Component and State Boundaries
-- Added IX. No Silent Feature Removal
-- Added X. Testable UI Behavior
-- Added XI. Accessibility and Predictable Interaction
-- Added XII. Safe Persistence and Synchronization Evolution
-- Added XIII. Multi-Church Ready Without Premature Complexity
-- Added XIV. Specification and Plan Traceability
-- Added XV. Verified Frontend Completion Gates
+- I. Backward Compatibility First -> I. Platform Integrity
+- II. Incremental Change Over Rewrite -> II. Worship Reliability and Operator Safety
+- III. Stable REST Contracts -> III. Offline-First Core Functionality
+- IV. UI-Aware API Evolution -> IV. Data Integrity, Compatibility, and Preservation
+- XIII. Specification and Plan Traceability -> V. Specification and Verification Discipline
 Added sections:
+- Architecture and Technology Constraints
+- Development Workflow and Quality Gates
+Removed sections:
 - Implementation Constraints
 - Delivery Workflow
-Removed sections:
-- None
 Follow-up TODOs:
 - None
 -->
-# Church Song UI Constitution
+# Church Song Platform Constitution
 
 ## Core Principles
 
-### I. Workflow Stability First
-Existing working functionality and user workflows MUST be preserved unless an approved
-specification explicitly changes them. Regressions in primary worship flows, editing flows,
-projection flows, or persisted UI behavior are defects and MUST be treated as release blockers.
+### I. Platform Integrity
+`church-song-ui` and `church-song-api` are separate repositories but one product. Every feature
+MUST identify whether it affects the UI, API, or both. Cross-repository features MUST be
+specified, planned, implemented, and tested as one platform behavior. Business rules MUST have one
+authoritative home and MUST NOT be duplicated between UI and API. Existing API contracts and UI
+behavior MUST remain compatible unless an approved specification explicitly authorizes a breaking
+change.
 
-Rationale: The frontend is the operational surface used during real services, so reliability of
-known workflows matters more than opportunistic redesign.
+Rationale: The operator experiences one Church Song Platform, regardless of repository boundaries.
 
-### II. Incremental Frontend Change
-Frontend changes MUST be incremental and scoped to the approved need. The application MUST NOT
-receive unnecessary architectural rewrites, framework migrations, or broad state-management
-replacements unless an approved specification demonstrates the need and protects existing
+### II. Worship Reliability and Operator Safety
+Live worship behavior MUST prioritize predictable, safe operation. Operator preview state and live
+projector state MUST remain conceptually separate. Selecting or previewing content MUST NOT
+unintentionally change what the congregation sees, and projector actions that affect live output
+MUST be explicit. Projector session restoration, clear lyrics, black screen, background selection,
+Previous/Next navigation, and separate projector-window behavior MUST NOT regress. Worship-critical
+workflows MUST favor simple, deterministic behavior over clever automation.
+
+Rationale: An unexpected live projection change can disrupt a worship service immediately.
+
+### III. Offline-First Core Functionality
+Core worship functionality MUST remain usable without internet access. Normal Bible projection MUST
+NOT require internet access; Bible data MUST be bundled or stored locally behind the existing
+provider abstraction. Web or API Bible sources MAY be optional enhancements, but MUST NOT become a
+runtime dependency for core projection. Local song, playlist, service, settings, and Bible
+workflows MUST continue functioning offline wherever they currently do.
+
+Rationale: Worship services must be reliable in low-connectivity and no-connectivity environments.
+
+### IV. Data Integrity, Compatibility, and Preservation
+Existing songs, song families, multilingual translations, editable song sections, playlists,
+service history, settings, backups, and Bible data MUST be preserved. Database or schema changes
+MUST include a migration or compatibility plan. Service History snapshots MUST remain immutable;
+reusing a service MUST create new working state rather than mutate historical records. Changes MUST
+avoid silent data loss, and backward compatibility is the default unless a specification explicitly
+documents and justifies a migration.
+
+Rationale: Church data represents durable ministry records and cannot be casually recreated.
+
+### V. Specification and Verification Discipline
+Feature work MUST follow this lifecycle: Constitution -> Specification -> Plan -> Tasks ->
+Implementation -> Verification. Specifications MUST define user-visible behavior and acceptance
+criteria before implementation. Plans MUST identify affected repositories and architectural
+boundaries, and tasks MUST identify ownership as UI, API, or Integration. Implementation MUST NOT
+silently expand beyond the approved specification. Every completed feature MUST be tested against
+its acceptance criteria; adjacent worship-critical workflows require regression testing. Fixes
+found during testing MUST update the relevant specification or tasks when they change intended
 behavior.
 
-Rationale: Small, targeted changes are easier to verify across a large UI with many interactive
-paths.
+Rationale: Explicit scope and verification make live-operation changes safer and auditable.
 
-### III. Backward-Compatible UI Behavior
-UI behavior MUST remain backward compatible by default. Navigation patterns, interaction flow,
-screen semantics, keyboard behavior, and persisted usage expectations MAY change only when a
-feature specification explicitly requires it and documents the user impact.
+## Architecture and Technology Constraints
 
-Rationale: Users build muscle memory around worship operation screens, and unintended behavior
-changes carry real service risk.
+- The UI MUST use React with Vite, and the API MUST use Java with Spring Boot.
+- Persistence MUST remain compatible with the existing SQLite-based storage unless an approved
+  feature explicitly plans a migration.
+- Bible data MUST remain logically separate from the main application database wherever that
+  separation already exists.
+- Multilingual infrastructure MUST continue supporting English, Haitian Creole, Spanish, and French
+  wherever those languages are currently supported.
+- Manual translations and editable song sections MUST remain first-class supported data.
+- Operator and projector experiences MUST remain separate concerns.
+- Current features MUST NOT introduce premature multi-tenancy, billing, or cloud-only dependencies.
+  A future web-based multi-church subscription platform requires its own approved specification.
+- Architecture MUST remain simple; teams MUST reuse existing abstractions and helpers before adding
+  duplicate state, services, dependencies, or unnecessary layers.
 
-### IV. Backend-Aware UI Contracts
-Any UI change that depends on API behavior MUST account for the corresponding backend contract
-before implementation begins. Specifications and plans MUST identify the expected backend contract,
-compatibility assumptions, required sequencing, and any fallback behavior needed if the frontend
-and backend roll out separately.
+## Development Workflow and Quality Gates
 
-Rationale: The frontend and backend must evolve together without breaking live usage.
-
-### V. Core Worship Workflow Preservation
-Projector behavior, operator workflow, playlist behavior, service-history behavior, and
-song-selection behavior MUST remain stable unless an approved specification explicitly changes
-them. Any work touching these areas MUST state the current behavior, intended delta, and
-compatibility protections.
-
-Rationale: These flows form the operational core of the Church Song application.
-
-### VI. Offline-First Bible Operation
-Bible functionality MUST remain fully usable offline for core operation. Core Bible lookup,
-preview, and projection flows MUST NOT depend on internet access at runtime, and UI changes to
-Bible screens MUST preserve that offline baseline unless explicitly marked as non-core optional
-enhancements in the specification.
-
-Rationale: Bible access is a core ministry need and must remain dependable in low-connectivity
-environments.
-
-### VII. Multilingual Experience Preservation
-Multilingual song support and language-aware behavior MUST be preserved. Changes to song display,
-selection, family relationships, filters, language pills, Bible reference language handling, or
-projection behavior MUST maintain the existing ability to operate across supported languages unless
-an approved specification explicitly changes that behavior.
-
-Rationale: Language-aware worship workflows are central product behavior, not optional polish.
-
-### VIII. Clear Component and State Boundaries
-Components, hooks, utilities, state containers, and side-effect boundaries MUST remain clear and
-maintainable. Business or workflow logic MUST NOT be duplicated unnecessarily across components,
-and shared behavior MUST be centralized where practical.
-
-Rationale: Clear boundaries keep the React/Vite codebase easier to extend without introducing
-drift.
-
-### IX. No Silent Feature Removal
-Existing features, controls, keyboard behavior, projector controls, and persistence behavior MUST
-NOT be silently removed or degraded. Any intentional removal or deprecation MUST be explicit in
-the approved specification, visible in review, and justified in terms of user impact.
-
-Rationale: Silent removal breaks trust and often surfaces only during service use.
-
-### X. Testable UI Behavior
-New UI behavior MUST be testable and SHOULD include appropriate automated tests where practical.
-Riskier changes, especially those affecting workflows, persistence, synchronization, or API-driven
-rendering, MUST include automated coverage or a documented reason why coverage is not practical.
-
-Rationale: High-change interfaces need executable checks to prevent regressions across many user
-paths.
-
-### XI. Accessibility and Predictable Interaction
-Accessibility, readable layouts, and predictable user interaction MUST be preserved. Changes MUST
-maintain usable focus behavior, readable content structure, understandable controls, and stable
-interaction feedback across desktop and projector-adjacent workflows.
-
-Rationale: The application is used in time-sensitive settings where clear interaction matters.
-
-### XII. Safe Persistence and Synchronization Evolution
-Changes to `localStorage`, `BroadcastChannel`, projector synchronization, or persisted UI state
-MUST preserve existing sessions and backward compatibility where practical. Migrations of stored
-state MUST be compatibility-aware, and new synchronization behavior MUST avoid breaking current
-operator or projector windows.
-
-Rationale: Persisted state and cross-window sync sit directly on active worship sessions and are
-costly to break.
-
-### XIII. Multi-Church Ready Without Premature Complexity
-New frontend work MUST avoid blocking future multi-church, multi-tenant evolution, but MUST NOT
-introduce premature tenant abstractions without a concrete requirement. Designs SHOULD keep seams
-for future church-aware configuration, branding, and data partitioning while preserving today’s
-simplicity.
-
-Rationale: The product needs room to grow without paying unnecessary complexity costs now.
-
-### XIV. Specification and Plan Traceability
-Every implementation MUST be traceable back to an approved specification and plan. UI changes,
-state changes, interaction changes, and test additions MUST be explainable in terms of the
-governing Spec Kit artifacts for that work.
-
-Rationale: Traceability keeps scope disciplined and reviewable.
-
-### XV. Verified Frontend Completion Gates
-Implementation is not complete until the frontend builds successfully and the relevant tests pass.
-Completion claims MUST identify what was verified and MUST distinguish completed validation from
-any remaining risk or unrun checks.
-
-Rationale: Frontend correctness depends on verified build and interaction safety, not just visual
-inspection.
-
-## Implementation Constraints
-
-- React and Vite remain the existing frontend platform unless an approved specification explicitly
-  authorizes otherwise.
-- UI behavior that depends on backend responses MUST be reviewed against the corresponding API
-  contract before release.
-- Core Bible workflows MUST continue to operate without network dependence during normal use.
-- Multilingual song behavior and projector workflows MUST remain compatible with current usage
-  unless explicitly changed by specification.
-- Persisted browser state and cross-window projector synchronization MUST evolve with backward
-  compatibility in mind.
-
-## Delivery Workflow
-
-- Work begins with an approved specification and an approved implementation plan.
-- Implementation tasks MUST map back to those artifacts before UI code changes are considered in
-  scope.
-- Reviewers MUST check workflow stability, API dependency impact, persistence compatibility,
-  accessibility risk, and automated test coverage as part of normal review.
-- Before completion, contributors MUST verify a successful frontend build and the relevant tests,
-  and they MUST report any validation they could not run.
+- Before implementation, teams MUST inspect both `church-song-ui` and `church-song-api` when a
+  feature could cross their boundary.
+- Each plan MUST explicitly classify the change as UI-only, API-only, or cross-repository.
+- Work MUST preserve existing behavior outside the approved feature scope.
+- Completion requires relevant UI tests, API tests, build checks, and manual acceptance testing.
+- Cross-repository changes MUST include integration verification.
+- Worship-critical changes MUST include manual projector-behavior testing.
+- Contributors MUST NOT commit generated artifacts, temporary files, local database backups, IDE
+  files, or secrets unless they are intentionally part of the product.
+- Credentials, secrets, church-specific private values, and machine-specific absolute paths MUST
+  NOT be hardcoded.
+- Every new dependency MUST be justified by the feature, and changes MUST remain small and
+  reviewable.
 
 ## Governance
 
-This constitution governs frontend changes for the Church Song UI and takes precedence over local
-habits or undocumented preferences. Amendments require an explicit update to this document, a clear
-reason for the change, and review against existing specifications, plans, UI behavior, backend
-contract assumptions, offline Bible requirements, persistence compatibility, and synchronization
-impact.
+This constitution governs both repositories in the Church Song Platform workspace and takes
+precedence over local habits and undocumented preferences. Feature specifications, plans, and tasks
+MUST comply with it. If an existing specification conflicts with this constitution, the conflict
+MUST be identified before implementation. Amendments MUST be explicit, documented, and reviewed for
+effects on offline capability, data integrity, compatibility, and projector safety. Those
+protections MUST NOT be weakened without a deliberate constitution amendment.
 
-Versioning policy for this constitution follows semantic versioning. MAJOR versions capture
-backward-incompatible governance changes or removals of existing principles. MINOR versions add new
-principles or materially expand governance requirements. PATCH versions clarify wording without
-changing intent.
+Constitution versions follow semantic versioning: MAJOR for incompatible governance changes, MINOR
+for new principles or materially expanded rules, and PATCH for clarifications only. Compliance
+review is mandatory before implementation and completion. Reviews MUST verify affected repository
+scope, approved artifacts, compatibility protections, required tests, and the relevant acceptance
+and regression checks.
 
-Compliance review is mandatory for every implementation. Reviews MUST confirm that the work is
-traceable to approved Spec Kit artifacts, preserves stable user workflows unless explicitly
-changed, accounts for backend dependencies, maintains accessibility and persistence expectations,
-includes appropriate automated tests where practical, and verifies build success plus relevant test
-execution before the work is considered complete.
-
-**Version**: 1.0.0 | **Ratified**: 2026-08-29 | **Last Amended**: 2026-08-29
+**Version**: 2.0.0 | **Ratified**: 2026-08-29 | **Last Amended**: 2026-09-01
