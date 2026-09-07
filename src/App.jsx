@@ -3700,6 +3700,11 @@ function App() {
     setCurrentSongSourceId(sourceSongId)
   }
 
+  function clearOperatorPlaylistContext() {
+    setSelectedPlaylist(null)
+    setOperatorPreviewSong(null)
+  }
+
   function prepareOperatorPreviewForPlaylist(
     playlist
   ) {
@@ -5173,12 +5178,23 @@ function App() {
       const selectedPlaylistChanged =
         nextSelectedPlaylist?.id !==
         currentSelectedPlaylistId
+      const lastPlaylistWasRemoved =
+        playlists.length > 0 && data.length === 0
 
       setPlaylists(data)
 
       setSelectedPlaylist(nextSelectedPlaylist)
 
       if (
+        loadedServicePlanId == null &&
+        data.length === 0
+      ) {
+        clearOperatorPlaylistContext()
+
+        if (lastPlaylistWasRemoved) {
+          clearLiveProjectionLyrics()
+        }
+      } else if (
         loadedServicePlanId == null &&
         selectedPlaylistChanged
       ) {
@@ -8195,18 +8211,39 @@ function App() {
       )
 
       if (target.type === 'playlist') {
-        const nextPlaylist =
-          reusablePlaylists[0] ||
-          playlists.find(
-            (playlist) =>
-              playlist.id !==
-              target.playlist.id
-          ) ||
-          null
-
-        activatePlaylistInConsole(
-          nextPlaylist
+        const remainingPlaylists = playlists.filter(
+          (playlist) =>
+            playlist.id !== target.playlist.id
         )
+
+        setPlaylists(remainingPlaylists)
+        setOpenedPlaylistId((current) =>
+          current === target.playlist.id
+            ? null
+            : current
+        )
+        setManagedPlaylistId((current) =>
+          current === target.playlist.id
+            ? null
+            : current
+        )
+        setPrioritizedManagedPlaylistId(
+          (current) =>
+            current === target.playlist.id
+              ? null
+              : current
+        )
+
+        if (
+          remainingPlaylists.length === 0 ||
+          selectedPlaylist?.id === target.playlist.id
+        ) {
+          clearOperatorPlaylistContext()
+        }
+
+        if (remainingPlaylists.length === 0) {
+          clearLiveProjectionLyrics()
+        }
       } else {
         initializeFreshSessionDefaults()
       }
@@ -8715,8 +8752,15 @@ function App() {
 
       setPlaylists(remainingPlaylists)
 
-      if (selectedPlaylist?.id === managedPlaylist.id) {
-        setSelectedPlaylist(null)
+      if (
+        remainingPlaylists.length === 0 ||
+        selectedPlaylist?.id === managedPlaylist.id
+      ) {
+        clearOperatorPlaylistContext()
+      }
+
+      if (remainingPlaylists.length === 0) {
+        clearLiveProjectionLyrics()
       }
 
       setManagedPlaylistId(null)
@@ -9195,6 +9239,15 @@ function App() {
     setProjectionMode('LIVE')
   }
 
+  function clearLiveProjectionLyrics() {
+    if (projectionMode === 'BLACK') {
+      previousVisibleModeRef.current = 'CLEAR'
+      return
+    }
+
+    setProjectionMode('CLEAR')
+  }
+
   function toggleClearLyrics() {
     if (projectionMode === 'BLACK') {
       previousVisibleModeRef.current =
@@ -9205,11 +9258,12 @@ function App() {
       return
     }
 
-    setProjectionMode((currentMode) =>
-      currentMode === 'CLEAR'
-        ? 'LIVE'
-        : 'CLEAR'
-    )
+    if (projectionMode === 'CLEAR') {
+      setProjectionMode('LIVE')
+      return
+    }
+
+    clearLiveProjectionLyrics()
   }
 
   function toggleBlackScreen() {
