@@ -1778,6 +1778,17 @@ function findMatchingSectionIndex(
     : 0
 }
 
+function getInitialPlaylistSectionIndex(song) {
+  const chorusIndex = parseLyricsSections(song)
+    .findIndex(
+      (section) =>
+        normalizeSectionType(section.type) ===
+        'CHORUS'
+    )
+
+  return chorusIndex >= 0 ? chorusIndex : 0
+}
+
 function getSongTypeBadge(songType) {
   if (!songType) {
     return null
@@ -3720,7 +3731,21 @@ function App() {
       return
     }
 
-    selectPlaylistSong(firstPlaylistSong)
+    const nextSong = resolveOperatorPreviewSong(
+      firstPlaylistSong,
+      {
+        applySessionDefaults:
+          shouldApplySessionDefaults(
+            currentSongSourceId
+          ),
+      }
+    )
+
+    setOperatorPreviewSong(nextSong, {
+      currentSectionIndex:
+        getInitialPlaylistSectionIndex(nextSong),
+      sourceSongId: firstPlaylistSong.id,
+    })
   }
 
   function clearLiveProjectionForPlaylistSwitch() {
