@@ -1,0 +1,72 @@
+// Run with a local Vite server and Playwright (or PLAYWRIGHT_MODULE).
+// Browser API requests are mocked; backend persistence has separate integration tests.
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const assert = require('node:assert/strict');
+(async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext();
+    let events = [{ id: 1, title: 'Legacy Event', eventDate: '2099-09-17', startTime: '19:30', birthdayEntries: [] }];
+    await context.route(`http://${new URL(process.env.EVENTS_TEST_URL || 'http://127.0.0.1:5178').hostname}:8080/**`, async route => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (!path.startsWith('/events')) return route.fulfill({ json: [] });
+      if (request.method() === 'POST') events.push({ ...request.postDataJSON(), id: events.length + 1 });
+      if (request.method() === 'PUT') events = events.map(event => event.id === Number(path.split('/').pop()) ? { ...request.postDataJSON(), id: event.id } : event);
+      return route.fulfill({ json: request.method() === 'GET' ? events : events.at(-1) });
+    });
+    const operator = await context.newPage();
+    await operator.goto(process.env.EVENTS_TEST_URL || 'http://127.0.0.1:5178');
+    const openEvents = () => operator.getByRole('button', { name: /Upcoming Events/ }).click();
+    await openEvents();
+    await operator.getByRole('button', { name: '+ Add Event', exact: true }).click();
+    const form = operator.locator('.modal');
+    const labels = await form.locator('label').evaluateAll(nodes => nodes.map(node => node.firstChild.textContent));
+    assert.deepEqual(labels.slice(1, 8), ['Title *', 'Start Date *', 'End Date', 'Start Time *', 'End Time', 'Host Name (optional)', 'Location']);
+    await operator.getByLabel('Title *', { exact: true }).fill('Convention');
+    await operator.getByLabel('Start Date *', { exact: true }).fill('2099-09-17');
+    await operator.getByLabel('Start Time *', { exact: true }).fill('19:30');
+    await operator.getByLabel('Host Name (optional)', { exact: true }).fill('Pastor John Smith');
+    await operator.getByRole('button', { name: 'Add Event', exact: true }).click();
+    await operator.getByText('Host: Pastor John Smith', { exact: true }).waitFor();
+    await operator.reload(); await openEvents();
+    const popup = context.waitForEvent('page');
+    await operator.getByRole('button', { name: 'Send to Projector', exact: true }).click();
+    const projector = await popup;
+    await projector.getByText('Host: Pastor John Smith', { exact: true }).waitFor();
+    const card = operator.locator('.event-card').filter({ has: operator.getByRole('heading', { name: 'Convention', exact: true }) });
+    await card.getByRole('button', { name: 'Edit', exact: true }).click();
+    assert.equal(await operator.getByLabel('Host Name (optional)', { exact: true }).inputValue(), 'Pastor John Smith');
+    await operator.getByLabel('Host Name (optional)', { exact: true }).fill('Pastor James Pierre');
+    await operator.getByRole('button', { name: 'Save Event', exact: true }).click();
+    await operator.getByText('Host: Pastor James Pierre', { exact: true }).waitFor();
+    await operator.reload(); await openEvents();
+    await operator.getByText('Host: Pastor James Pierre', { exact: true }).waitFor();
+    const previewLines = await card.locator(':scope > div').first().locator(':scope > *').allTextContents();
+    assert.match(previewLines[1], /Sep 17/);
+    assert.equal(previewLines[2], 'Convention');
+    assert.equal(previewLines[3], 'Host: Pastor James Pierre');
+    assert((await projector.locator('.event-projection-item').nth(1).innerText()).includes('Host: Pastor John Smith'));
+    await operator.getByRole('button', { name: 'Send to Projector', exact: true }).click();
+    await projector.getByText('Host: Pastor James Pierre', { exact: true }).waitFor();
+    const snapshot = await operator.evaluate(() => JSON.parse(localStorage.getItem('church-song-projector-state')));
+    assert.equal(snapshot.projectedEvents[1].hostName, 'Pastor James Pierre');
+    const projected = projector.locator('.event-projection-item').nth(1);
+    const lines = await projected.locator(':scope > div').allTextContents();
+    assert.equal(lines[1], 'Convention'); assert.equal(lines[2], 'Host: Pastor James Pierre'); assert.match(lines[3], /7:30 PM/);
+    assert(!(await projector.locator('.event-projection-item').first().innerText()).includes('Host:'));
+    await card.getByRole('button', { name: 'Edit', exact: true }).click();
+    await operator.getByLabel('Host Name (optional)', { exact: true }).fill('   ');
+    await operator.getByRole('button', { name: 'Save Event', exact: true }).click();
+    await operator.locator('.modal-overlay').waitFor({ state: 'hidden' });
+    assert.equal(events[1].hostName, null);
+    assert((await projected.innerText()).includes('Host: Pastor James Pierre'));
+    await operator.getByRole('button', { name: 'Send to Projector', exact: true }).click();
+    await projector.getByText('Host: Pastor James Pierre', { exact: true }).waitFor({ state: 'hidden' });
+    assert.equal(await projected.locator(':scope > div').count(), 3);
+    await operator.getByRole('button', { name: '+ Add Event', exact: true }).click();
+    await form.locator('select').first().selectOption('BIRTHDAY_LIST');
+    assert.equal(await operator.getByLabel('Host Name (optional)', { exact: true }).count(), 0);
+    console.log('PASS: form order, create/edit/reload, host payload and display order, legacy/blank host omission, live edit isolation, no birthday host field.');
+  } finally { await browser.close(); }
+})().catch(error => { console.error(error); process.exit(1); });

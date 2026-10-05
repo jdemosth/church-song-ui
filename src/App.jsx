@@ -1,3 +1,7 @@
+import NetworkAccessPanel from './NetworkAccessPanel'
+import { createNetworkProjector, projectorId, networkBackgroundFile } from './networkProjector'
+import { API_BASE_URL } from './apiOrigin'
+import { createProjectorStartupGate, projectorAppearanceState } from './projectorStartup'
 import {
   useEffect,
   useEffectEvent,
@@ -8,6 +12,17 @@ import {
 } from 'react'
 
 import './App.css'
+import './responsive.css'
+import NotesPanel from './NotesPanel'
+import NoteProjector from './NoteProjector'
+import BibleProjector from './BibleProjector'
+import { nextNoteNavigation } from './noteScroll'
+import { selectedEvents, liveVerseIndex, noteValidation } from './operatorFeatures'
+import { birthdayDateLabel } from './birthdayDates'
+import { keyboardShortcut, presentationMode } from './projectorKeyboard'
+import { readImageTextTheme } from './projectorTextTheme'
+import { announceProjectorReady, createProjectorConnection } from './projectorConnection'
+import { formatEventDateRange, isUpcomingEvent, validateEventDates } from './eventDates'
 import {
   loadBackgroundImage,
   saveBackgroundImage,
@@ -49,18 +64,21 @@ const DEFAULT_PROJECTION_SETTINGS = {
 const BACKGROUND_OPTIONS = [
   {
     id: 'sky-field',
+    textTheme: 'dark',
     name: 'Sky Field',
     swatchClassName:
       'background-swatch background-swatch-sky-field',
   },
   {
     id: 'sunrise',
+    textTheme: 'dark',
     name: 'Sunrise',
     swatchClassName:
       'background-swatch background-swatch-sunrise',
   },
   {
     id: 'deep-blue',
+    textTheme: 'light',
     name: 'Deep Blue',
     swatchClassName:
       'background-swatch background-swatch-deep-blue',
@@ -161,6 +179,28 @@ const BIBLE_PROJECTION_LANGUAGE_OPTIONS = [
 const PROJECTION_CONTENT_TYPES = {
   SONG: 'SONG',
   BIBLE: 'BIBLE',
+  EVENT: 'EVENT',
+  NOTE: 'NOTE',
+}
+
+const EVENTS_PER_PAGE = 4
+const BIRTHDAYS_PER_PAGE = 8
+const BIRTHDAY_LIST = 'BIRTHDAY_LIST'
+const MONTH_NAMES = Array.from({ length: 12 }, (_, index) =>
+  new Date(2000, index, 1).toLocaleString('en-US', { month: 'long' }))
+
+function isBirthdayList(event) {
+  return event?.eventType === BIRTHDAY_LIST
+}
+
+function sortBirthdays(entries = []) {
+  return [...entries].sort((a, b) => a.day - b.day || a.name.localeCompare(b.name))
+}
+
+function eventPageCount(events) {
+  return isBirthdayList(events[0])
+    ? Math.ceil((events[0].birthdayEntries?.length || 0) / BIRTHDAYS_PER_PAGE)
+    : Math.ceil(events.length / EVENTS_PER_PAGE)
 }
 
 function normalizeLanguage(value) {
@@ -524,6 +564,7 @@ function createBiblePreviewPassage({
   frenchPassage,
   englishPassage,
   spanishPassage,
+  referenceTranslationCode,
 }) {
   const hasFrench =
     frenchPassage?.verses?.length > 0
@@ -550,8 +591,17 @@ function createBiblePreviewPassage({
         ? BIBLE_PROJECTION_MODES.FRENCH
         : BIBLE_PROJECTION_MODES.FRENCH_ENGLISH
 
+  const referencePassage =
+    referenceTranslationCode ===
+    BIBLE_TRANSLATION_CODES.ENGLISH
+      ? englishPassage
+      : referenceTranslationCode ===
+            BIBLE_TRANSLATION_CODES.SPANISH
+        ? spanishPassage
+        : frenchPassage
   const sourcePassage =
-    effectiveMode ===
+    referencePassage ||
+    (effectiveMode ===
     BIBLE_PROJECTION_MODES.ENGLISH
       ? englishPassage || frenchPassage
       : effectiveMode ===
@@ -559,7 +609,7 @@ function createBiblePreviewPassage({
         ? spanishPassage ||
           frenchPassage ||
           englishPassage
-      : frenchPassage || englishPassage
+      : frenchPassage || englishPassage)
   const verseNumbers = (
     sourcePassage?.verses || []
   ).map((verse) => verse.verseNumber)
@@ -652,6 +702,7 @@ function createBiblePreviewPassage({
 
   return {
     projectionMode: effectiveMode,
+    referenceTranslationCode,
     bookKey: sourcePassage.bookKey,
     chapter: sourcePassage.chapter,
     startVerse: sourcePassage.startVerse,
@@ -872,6 +923,41 @@ function createBlankSongForm() {
   }
 }
 
+const EVENT_TYPE_OPTIONS = [
+  'SERVICE',
+  'MEETING',
+  'YOUTH',
+  'CONFERENCE',
+  'SPECIAL_EVENT',
+  'OTHER',
+]
+
+const EVENT_COLOR_PALETTE = [
+  ['Black', '#000000'], ['White', '#FFFFFF'], ['Dark Blue', '#183A65'],
+  ['Royal Blue', '#2563EB'], ['Red', '#C62828'], ['Burgundy', '#800020'],
+  ['Purple', '#8B3A8B'], ['Magenta', '#C026D3'], ['Green', '#15803D'],
+  ['Gold', '#B8860B'],
+]
+
+function createBlankEventForm() {
+  return {
+    title: '', eventDate: '', endDate: '', startTime: '', endTime: '',
+    birthdayMonth: new Date().getMonth() + 1, displayYear: '', birthdayEntries: [],
+    hostName: '', location: '', description: '', eventType: '',
+    titleColor: '#000000', dateColor: '#8B3A8B', detailsColor: '#000000',
+    titleBold: false, titleUnderline: false, titleItalic: false,
+    dateBold: true, dateUnderline: true, dateItalic: false,
+    detailsBold: false, detailsUnderline: false, detailsItalic: false,
+  }
+}
+
+function getLocalIsoDate() {
+  const now = new Date()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${now.getFullYear()}-${month}-${day}`
+}
+
 function normalizeAppSettings(
   settings
 ) {
@@ -944,7 +1030,7 @@ function getMelodyReferenceAudioUrl(
     return ''
   }
 
-  return `http://localhost:8080${audioPath}`
+  return `${API_BASE_URL}${audioPath}`
 }
 
 function getMelodyReferenceSummary(
@@ -1434,15 +1520,6 @@ function shouldApplySessionDefaults(
   return currentSongSourceId == null
 }
 
-function hasRestorableProjectorSession(
-  projectorState
-) {
-  return Boolean(
-    projectorState?.projectionSong ||
-      projectorState?.projectedBiblePassage
-  )
-}
-
 function getValidSongFamilyId(song) {
   const familyId = song?.familyId
 
@@ -1920,6 +1997,13 @@ function createProjectorState({
   projectionContentType = PROJECTION_CONTENT_TYPES.SONG,
   biblePassage = null,
   bibleVerseIndex = 0,
+  event = null,
+  events = [],
+  eventPageIndex = 0,
+  note = '',
+  noteHeading = {},
+  noteNavigation = [],
+  eventSnapshotVersion = 0,
   projectionMode,
   backgroundType = DEFAULT_BACKGROUND_TYPE,
   backgroundVariant = DEFAULT_BACKGROUND_VARIANT,
@@ -1935,6 +2019,13 @@ function createProjectorState({
       biblePassage || null,
     projectedBibleVerseIndex:
       bibleVerseIndex,
+    projectedEvent: event || null,
+    projectedEvents: events || [],
+    projectedEventPageIndex: eventPageIndex,
+    projectedNote: note,
+    projectedNoteHeading: noteHeading,
+    noteNavigation,
+    ...(projectionContentType === PROJECTION_CONTENT_TYPES.EVENT ? { eventSnapshotVersion } : {}),
     projectionMode,
     backgroundType,
     backgroundVariant,
@@ -1959,61 +2050,6 @@ function createProjectorCommandMessage(command) {
     type: PROJECTOR_COMMAND_MESSAGE,
     command,
   }
-}
-
-function getProjectionShortcutCommand(event) {
-  if (
-    event.key === 'ArrowRight' ||
-    event.key === ' '
-  ) {
-    return 'NEXT'
-  }
-
-  if (event.key === 'ArrowLeft') {
-    return 'PREVIOUS'
-  }
-
-  if (
-    event.key === 'b' ||
-    event.key === 'B'
-  ) {
-    return 'BLACK'
-  }
-
-  if (
-    event.key === 'c' ||
-    event.key === 'C'
-  ) {
-    return 'CLEAR'
-  }
-
-  return null
-}
-
-function shouldIgnoreProjectionShortcut(event) {
-  if (
-    event.metaKey ||
-    event.ctrlKey ||
-    event.altKey
-  ) {
-    return true
-  }
-
-  const target = event.target
-
-  if (!(target instanceof HTMLElement)) {
-    return false
-  }
-
-  if (target.isContentEditable) {
-    return true
-  }
-
-  return Boolean(
-    target.closest(
-      'input, textarea, select, [contenteditable="true"], .modal, .modal-overlay'
-    )
-  )
 }
 
 async function readErrorMessage(response) {
@@ -2439,6 +2475,7 @@ function AutoFitLyrics({
   containerClassName = '',
   textClassName = '',
   textAlign = 'center',
+  deferResize = false,
 }) {
   const containerRef = useRef(null)
   const textRef = useRef(null)
@@ -2477,17 +2514,23 @@ function AutoFitLyrics({
 
     fitText()
 
-    const resizeObserver =
-      new ResizeObserver(fitText)
+    let resizeFrame
+    const resizeObserver = new ResizeObserver(() => {
+      if (!deferResize) { fitText(); return }
+      cancelAnimationFrame(resizeFrame)
+      resizeFrame = requestAnimationFrame(fitText)
+    })
 
     resizeObserver.observe(container)
 
     return () => {
       resizeObserver.disconnect()
+      cancelAnimationFrame(resizeFrame)
     }
   }, [
     maxFontSize,
     minFontSize,
+    deferResize,
     text,
     textAlign,
   ])
@@ -2870,12 +2913,144 @@ function AppScrollArea({
   )
 }
 
+function BirthdayEditor({ value, onChange }) {
+  const updatePerson = (index, field, nextValue) => onChange({
+    ...value,
+    birthdayEntries: value.birthdayEntries.map((person, personIndex) =>
+      personIndex === index ? { ...person, [field]: nextValue } : person),
+  })
+  const maxDay = new Date(2000, Number(value.birthdayMonth), 0).getDate()
+  return (
+    <div className="birthday-editor">
+      <label>Month<select value={value.birthdayMonth} onChange={(event) => onChange({ ...value, birthdayMonth: Number(event.target.value), birthdayEntries: value.birthdayEntries.map((person) => ({ ...person, month: Number(event.target.value) })) })}>
+        {MONTH_NAMES.map((month, index) => <option value={index + 1} key={month}>{month}</option>)}
+      </select></label>
+      <label>Display Year (optional)<input type="number" min="1" max="9999" value={value.displayYear} onChange={(event) => onChange({ ...value, displayYear: event.target.value })} /></label>
+      <h3>Birthdays</h3>
+      <p>Edit people below. Birthdays are sorted by day when saved. Each person’s birth year is shown when entered. Leave it blank to show only month and day. Display Year is list metadata.</p>
+      {value.birthdayEntries.map((person, index) => (
+        <div className="birthday-editor-row" key={index}>
+          <label>Name<input value={person.name} onChange={(event) => updatePerson(index, 'name', event.target.value)} /></label>
+          <label>{MONTH_NAMES[value.birthdayMonth - 1]} Day<input type="number" min="1" max={maxDay} value={person.day} onChange={(event) => updatePerson(index, 'day', event.target.value)} /></label>
+          <label>Birth Year (optional)<input type="number" min="1" max="9999" value={person.birthYear ?? ''} onChange={(event) => updatePerson(index, 'birthYear', event.target.value)} /></label>
+          <button type="button" className="button button-danger" aria-label={`Delete birthday ${index + 1}`} onClick={() => onChange({ ...value, birthdayEntries: value.birthdayEntries.filter((_, personIndex) => personIndex !== index) })}>Delete</button>
+        </div>
+      ))}
+      <button type="button" className="button button-secondary" onClick={() => onChange({ ...value, birthdayEntries: [...value.birthdayEntries, { name: '', month: Number(value.birthdayMonth), day: '', birthYear: '' }] })}>+ Add Birthday</button>
+    </div>
+  )
+}
+
+function EventsPageStatus({ events, pageIndex, live = true, canSend = false, listNavigation = false }) {
+  const birthdays = isBirthdayList(events[0])
+  const total = birthdays ? (events[0].birthdayEntries?.length || 0) : events.length
+  if (!total) return null
+  const pages = eventPageCount(events)
+  const size = birthdays ? BIRTHDAYS_PER_PAGE : EVENTS_PER_PAGE
+  const page = Math.min(Math.max(pageIndex, 0), pages - 1)
+  const label = birthdays ? 'Birthdays' : 'Events'
+  const noun = birthdays ? 'birthdays' : 'events'
+  return (
+    <div className="events-page-status" role="status" aria-live="polite" aria-atomic="true">
+      <div>
+        <span className="events-page-status-label">{live ? 'Projector' : 'Prepared'}</span>
+        <strong>{pages > 1 ? `${label} — Page ${page + 1} of ${pages}` : `${total} ${total === 1 ? (birthdays ? 'birthday' : 'event') : noun}`}</strong>
+        {pages > 1 && <span>Showing {noun} {page * size + 1}-{Math.min((page + 1) * size, total)} of {total}</span>}
+      </div>
+      <span className="events-page-status-hint">{listNavigation ? '↑ / ↓ Select · Enter Edit · ← / → Projector Pages · ' : pages > 1 ? '↑ / ↓ to navigate · ' : ''}{!listNavigation && canSend && 'Enter · Send to Projector · '}B · Black Screen</span>
+    </div>
+  )
+}
+
+function EventsProjection({ events, birthdayList = null, pageIndex = 0 }) {
+  const contentRef = useRef(null)
+
+  useLayoutEffect(() => {
+    const content = contentRef.current
+    const fitEvents = () => {
+      const bottom = content.getBoundingClientRect().bottom -
+        parseFloat(getComputedStyle(content).paddingBottom)
+      const fits = () => content.lastElementChild.getBoundingClientRect().bottom <= bottom
+      content.style.setProperty('--event-scale', '1')
+      if (fits()) return
+
+      // Fit wrapped titles/descriptions as a whole page without scrolling or overlap.
+      let low = 0
+      let high = 1
+      for (let step = 0; step < 12; step += 1) {
+        const scale = (low + high) / 2
+        content.style.setProperty('--event-scale', String(scale))
+        if (fits()) low = scale
+        else high = scale
+      }
+      content.style.setProperty('--event-scale', String(low))
+    }
+    fitEvents()
+    const observer = new ResizeObserver(fitEvents)
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [events, birthdayList, pageIndex])
+
+  if (birthdayList) {
+    const entries = sortBirthdays(birthdayList.birthdayEntries).slice(
+      pageIndex * BIRTHDAYS_PER_PAGE, (pageIndex + 1) * BIRTHDAYS_PER_PAGE)
+    return (
+      <div ref={contentRef} className="screen-content screen-content-event birthday-projection">
+        <div className="event-projection-heading birthday-projection-heading">
+          Birthdays for the Month of {MONTH_NAMES[birthdayList.birthdayMonth - 1]}
+        </div>
+        <div className="birthday-table" role="table" aria-label="Birthdays">
+          <div className="birthday-table-header" role="row">
+            <div role="columnheader">Name</div><div role="columnheader">Date</div>
+          </div>
+          {entries.map((person, index) => (
+            <div className="birthday-row" role="row" key={index}>
+              <div className="birthday-name" role="cell">{person.name}</div>
+              <div className="birthday-date" role="cell">{birthdayDateLabel(person)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div ref={contentRef} className="screen-content screen-content-event">
+      <div className="event-projection-heading">Upcoming Events</div>
+      {events.map((pageEvent) => {
+        const detailsStyle = {
+          color: 'var(--event-detail-color)',
+          fontWeight: pageEvent.detailsBold == null ? undefined : pageEvent.detailsBold ? 800 : 400,
+          fontStyle: pageEvent.detailsItalic ? 'italic' : 'normal',
+          textDecoration: pageEvent.detailsUnderline ? 'underline' : 'none',
+        }
+        return (
+          <div className="event-projection-item" key={pageEvent.id}>
+            <div className="event-projection-date" style={{ color: 'var(--event-text-color)', fontWeight: 800, fontStyle: pageEvent.dateItalic ? 'italic' : 'normal', textDecoration: 'underline' }}>{formatEventDateRange(pageEvent.eventDate, pageEvent.endDate)}</div>
+            <div className="event-projection-title" style={{ color: 'var(--event-text-color)', fontWeight: (pageEvent.titleBold ?? true) ? 800 : 400, fontStyle: pageEvent.titleItalic ? 'italic' : 'normal', textDecoration: pageEvent.titleUnderline ? 'underline' : 'none' }}>{pageEvent.title}</div>
+            {pageEvent.hostName?.trim() && <div className="event-projection-detail" style={detailsStyle}>Host: {pageEvent.hostName.trim()}</div>}
+            <div className="event-projection-detail" style={detailsStyle}>{formatServiceTime(pageEvent.startTime)}{pageEvent.endTime ? ` - ${formatServiceTime(pageEvent.endTime)}` : ''}</div>
+            {[pageEvent.location, pageEvent.description].filter(Boolean).map((detail, index) => <div className="event-projection-detail" key={index} style={detailsStyle}>{detail}</div>)}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function ProjectorDisplay({
   song,
   sectionIndex,
   projectionContentType = PROJECTION_CONTENT_TYPES.SONG,
   biblePassage = null,
   bibleVerseIndex = 0,
+  event = null,
+  events = [],
+  eventPageIndex = 0,
+  note = '',
+  noteHeading = {},
+  noteNavigation = [],
+  liveSendId = '',
   projectionMode,
   backgroundType = DEFAULT_BACKGROUND_TYPE,
   backgroundVariant = DEFAULT_BACKGROUND_VARIANT,
@@ -2909,6 +3084,10 @@ function ProjectorDisplay({
     ] ||
     biblePassage?.verses?.[0] ||
     null
+  const birthdayList = isBirthdayList(events[0] || event) ? (events[0] || event) : null
+  const eventPage = events.length
+    ? events.slice(eventPageIndex * EVENTS_PER_PAGE, (eventPageIndex + 1) * EVENTS_PER_PAGE)
+    : event ? [event] : []
   const normalizedProjectionSettings =
     normalizeProjectionSettings(
       projectionSettings
@@ -2953,7 +3132,9 @@ function ProjectorDisplay({
     }
   }
 
+  const bibleProjector = showFullscreenControl && projectionContentType === PROJECTION_CONTENT_TYPES.BIBLE
   const customBackgroundStyle =
+    !bibleProjector &&
     backgroundType === 'custom' &&
     customBackgroundUrl &&
     projectionMode !== 'BLACK'
@@ -2964,6 +3145,19 @@ function ProjectorDisplay({
           backgroundRepeat: 'no-repeat',
         }
       : undefined
+
+  const [customTextTheme, setCustomTextTheme] = useState(null)
+  useEffect(() => {
+    if (projectionContentType !== PROJECTION_CONTENT_TYPES.EVENT || backgroundType !== 'custom' || !customBackgroundUrl) return
+    let cancelled = false
+    readImageTextTheme(customBackgroundUrl).then((theme) => {
+      if (!cancelled) setCustomTextTheme({ url: customBackgroundUrl, theme })
+    })
+    return () => { cancelled = true }
+  }, [projectionContentType, backgroundType, customBackgroundUrl])
+  const eventTextTheme = backgroundType === 'custom'
+    ? (customTextTheme?.url === customBackgroundUrl ? customTextTheme.theme : 'light')
+    : (BACKGROUND_OPTIONS.find((option) => option.id === backgroundVariant)?.textTheme || 'light')
 
   const lyricsSizePreference =
     normalizedProjectionSettings.lyricsSizePreference
@@ -3032,7 +3226,11 @@ function ProjectorDisplay({
         <div
           className={[
             'projector-screen',
-            backgroundType === 'preset'
+            projectionContentType === PROJECTION_CONTENT_TYPES.NOTE ? 'projector-screen-note' : '',
+            projectionContentType === PROJECTION_CONTENT_TYPES.EVENT
+              ? 'projector-screen-event'
+              : '',
+            bibleProjector ? 'projector-screen-bible' : backgroundType === 'preset'
               ? `projector-screen-${backgroundVariant}`
               : 'projector-screen-custom',
             projectionMode === 'BLACK'
@@ -3041,6 +3239,7 @@ function ProjectorDisplay({
           ]
             .filter(Boolean)
             .join(' ')}
+          data-event-text-theme={projectionContentType === PROJECTION_CONTENT_TYPES.EVENT ? eventTextTheme : undefined}
           style={customBackgroundStyle}
         >
           {projectionMode === 'LIVE' &&
@@ -3090,7 +3289,7 @@ function ProjectorDisplay({
               PROJECTION_CONTENT_TYPES.BIBLE &&
             biblePassage &&
             currentBibleVerse && (
-              <div className="screen-content screen-content-bible">
+              bibleProjector ? <BibleProjector passage={biblePassage} verse={currentBibleVerse} maxFontSize={lyricsSizing.maxFontSize} /> : <div className="screen-content screen-content-bible">
                 <div className="screen-reference">
                   {biblePassage.reference}
                 </div>
@@ -3138,6 +3337,16 @@ function ProjectorDisplay({
                 </div>
               </div>
             )}
+
+          {projectionContentType === PROJECTION_CONTENT_TYPES.NOTE && note && (
+            <NoteProjector key={liveSendId} text={note} heading={noteHeading} navigation={noteNavigation} visible={projectionMode === 'LIVE'} />
+          )}
+
+          {projectionMode === 'LIVE' &&
+            projectionContentType === PROJECTION_CONTENT_TYPES.EVENT &&
+            (birthdayList || eventPage.length > 0) && (
+              <EventsProjection events={eventPage} birthdayList={birthdayList} pageIndex={eventPageIndex} />
+            )}
         </div>
       </div>
     </div>
@@ -3150,12 +3359,64 @@ function App() {
 
   const [activeView, setActiveView] =
     useState('operator')
+  const [projectedNote, setProjectedNote] = useState('')
+  const [projectedNoteHeading, setProjectedNoteHeading] = useState({})
+  const [noteNavigation, setNoteNavigation] = useState([])
+  const [verseJump, setVerseJump] = useState('')
+  const [verseJumpError, setVerseJumpError] = useState('')
+  const [prepareMode, setPrepareMode] =
+    useState(() => readStoredProjectorState()?.projectionContentType === PROJECTION_CONTENT_TYPES.BIBLE ? 'bible' : 'song')
+  const [activeKeyboardPanel, setActiveKeyboardPanel] = useState('CURRENT_SONG')
+  const [networkStatus, setNetworkStatus] = useState({ mode: 'probing', ready: false, projectors: 0 })
+  const networkProjectorRef = useRef(null)
+  const networkSendRef = useRef(null)
+  const networkSendRequestRef = useRef(null)
+  const [networkBackgroundData, setNetworkBackgroundData] = useState(null)
+  const [liveSend, setLiveSend] = useState(null)
+  const [projectorControl, setProjectorControl] = useState(null)
+  const [projectorStartupGate] = useState(() => createProjectorStartupGate(Date.now(), readStoredProjectorState()?.liveSend?.id))
+  const [sidebarKeyboardIndex, setSidebarKeyboardIndex] = useState(0)
+  const sideNavRef = useRef(null)
+  const adminKeyboardListRef = useRef(null)
+  const [highlightedServiceSongId, setHighlightedServiceSongId] = useState(null)
+  const [highlightedEventId, setHighlightedEventId] = useState(null)
 
   const [songs, setSongs] = useState([])
   const [playlists, setPlaylists] =
     useState([])
   const [servicePlans, setServicePlans] =
     useState([])
+  const [events, setEvents] = useState([])
+  const [selectedEventIds, setSelectedEventIds] = useState(null)
+  const [eventSelectionVersion, setEventSelectionVersion] = useState(0)
+  const [sentEventSelectionVersion, setSentEventSelectionVersion] = useState(0)
+  function changeEventSelection(ids) {
+    setSelectedEventIds(ids)
+    setEventSelectionVersion(version => version + 1)
+    setPreparedEventPages({})
+  }
+  const [eventPresentation, setEventPresentation] = useState(() => {
+    const state = readStoredProjectorState()
+    const event = state?.projectedEvents?.[0] || state?.projectedEvent
+    return state?.projectionContentType === PROJECTION_CONTENT_TYPES.EVENT && isBirthdayList(event)
+      ? String(event.id) : 'upcoming'
+  })
+  const [preparedEventPages, setPreparedEventPages] = useState({})
+  const keyboardSendInFlightRef = useRef(false)
+  const [isSendingEvents, setIsSendingEvents] = useState(false)
+  const eventSendInFlightRef = useRef(false)
+  const [eventSnapshotVersion, setEventSnapshotVersion] = useState(0)
+  const managementEvents = events.filter((event) => isBirthdayList(event) || isUpcomingEvent(event, getLocalIsoDate()))
+  const birthdayLists = events.filter(isBirthdayList)
+  const upcomingEvents = events.filter((event) =>
+    !isBirthdayList(event) && isUpcomingEvent(event, getLocalIsoDate()))
+  const selectedEventPresentation = eventPresentation === 'upcoming'
+    ? selectedEvents(upcomingEvents, selectedEventIds)
+    : birthdayLists.filter((event) => String(event.id) === eventPresentation)
+  const selectedEventPageCount = eventPageCount(selectedEventPresentation)
+  const [eventForm, setEventForm] = useState(createBlankEventForm)
+  const [editingEventId, setEditingEventId] = useState(null)
+  const [showEventModal, setShowEventModal] = useState(false)
   const [
     familyVersionsByFamilyId,
     setFamilyVersionsByFamilyId,
@@ -3262,6 +3523,11 @@ function App() {
       0
     )
   })
+  const [projectedEvent, setProjectedEvent] = useState(() =>
+    readStoredProjectorState()?.projectedEvent || null
+  )
+  const [projectedEvents, setProjectedEvents] = useState(() => readStoredProjectorState()?.projectedEvents || [])
+  const [projectedEventPageIndex, setProjectedEventPageIndex] = useState(() => readStoredProjectorState()?.projectedEventPageIndex || 0)
 
   const [sectionIndex, setSectionIndex] =
     useState(0)
@@ -3415,9 +3681,14 @@ function App() {
     previewBiblePassageData,
     setPreviewBiblePassageData,
   ] = useState(null)
+  const [settingsLoaded, setSettingsLoaded] = useState(false)
+  const settingsRequestVersionRef = useRef(0)
+  const projectorSyncReadyRef = useRef(false)
+  const projectorBackgroundSyncedRef = useRef(false)
   const projectorChannelRef = useRef(null)
-  const projectorWindowRef = useRef(null)
+  const projectorConnectionRef = useRef(null)
   const operatorContentViewportRef = useRef(null)
+  const bibleConsoleVerseRefs = useRef(new Map())
   const playlistSelectorRef = useRef(null)
   const backgroundInputRef = useRef(null)
   const learningAudioRef = useRef(null)
@@ -3450,7 +3721,7 @@ function App() {
     const storedSettings =
       readStoredProjectorSettings()
 
-    return {
+    return projectorStartupGate({
       projectionSong:
         storedState?.projectionSong || null,
       sectionIndex:
@@ -3464,8 +3735,12 @@ function App() {
       projectedBibleVerseIndex:
         storedState?.projectedBibleVerseIndex ||
         0,
+      projectedNote: '',
+      projectedEvent: storedState?.projectedEvent || null,
+      projectedEvents: storedState?.projectedEvents || [],
+      projectedEventPageIndex: storedState?.projectedEventPageIndex || 0,
       projectionMode:
-        storedState?.projectionMode || 'CLEAR',
+        'CLEAR',
       backgroundType:
         storedState?.backgroundType ||
         DEFAULT_BACKGROUND_TYPE,
@@ -3481,7 +3756,7 @@ function App() {
           storedState?.projectionSettings ||
             storedSettings
         ),
-    }
+    })
   })
 
   const [newSong, setNewSong] = useState(
@@ -3661,12 +3936,6 @@ function App() {
     setProjectionSong(null)
     setSectionIndex(0)
     setProjectionMode('LIVE')
-    setBackgroundType('preset')
-    setBackgroundVariant(
-      appSettings.defaultBackground
-    )
-    setCustomBackgroundId(null)
-    setCustomBackgroundName('')
   }
 
   function resolveOperatorPreviewSong(
@@ -3748,18 +4017,6 @@ function App() {
     })
   }
 
-  function clearLiveProjectionForPlaylistSwitch() {
-    setProjectionContentType(
-      PROJECTION_CONTENT_TYPES.SONG
-    )
-    setProjectionSong(null)
-    setSectionIndex(0)
-    setProjectedBiblePassage(null)
-    setProjectedBibleVerseIndex(0)
-    setProjectionMode('CLEAR')
-    lastSongProjectionRef.current = null
-  }
-
   function releasePlaylistSelectorFocus() {
     if (
       typeof document === 'undefined' ||
@@ -3775,14 +4032,40 @@ function App() {
   function activatePlaylistInConsole(
     playlist
   ) {
+    setPrepareMode('song')
     setSelectedPlaylist(playlist)
     setLoadedServicePlanId(null)
     prepareOperatorPreviewForPlaylist(playlist)
-    clearLiveProjectionForPlaylistSwitch()
     releasePlaylistSelectorFocus()
   }
 
+  function applySavedBackground(variant) {
+    setBackgroundType('preset')
+    setBackgroundVariant(variant)
+    setCustomBackgroundId(null)
+    setCustomBackgroundName('')
+    if (isProjectorWindow) {
+      setProjectorWindowState((current) => ({ ...current,
+        backgroundType: 'preset', backgroundVariant: variant,
+        customBackgroundId: null, customBackgroundName: '',
+      }))
+    }
+  }
+
+  async function persistApplicationSettings(nextSettings) {
+    const response = await fetch(`${API_BASE_URL}/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(nextSettings),
+    })
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response) || 'Could not save settings.')
+    }
+    return createSettingsForm(await response.json())
+  }
+
   async function saveApplicationSettings() {
+    if (!settingsLoaded) return
     const nextSettings =
       createSettingsForm(settingsForm)
 
@@ -3804,33 +4087,11 @@ function App() {
       setError('')
       setSuccessMessage('')
 
-      const response = await fetch(
-        'http://localhost:8080/settings',
-        {
-          method: 'PUT',
-          headers: {
-            'Content-Type':
-              'application/json',
-          },
-          body: JSON.stringify(nextSettings),
-        }
-      )
-
-      if (!response.ok) {
-        const message =
-          await readErrorMessage(response)
-
-        throw new Error(
-          message ||
-            'Could not save settings.'
-        )
-      }
-
-      const savedSettings =
-        createSettingsForm(
-          await response.json()
-        )
-
+      ++settingsRequestVersionRef.current
+      const savedSettings = await persistApplicationSettings(nextSettings)
+      networkCommand('BACKGROUND_CHANGE', { backgroundType: 'preset', backgroundVariant: savedSettings.defaultBackground, customBackgroundData: null, customBackgroundId: null, customBackgroundName: '' })
+      applySavedBackground(savedSettings.defaultBackground)
+      setSettingsLoaded(true)
       setAppSettings(savedSettings)
       setSettingsForm(savedSettings)
       setSuccessMessage(
@@ -3852,7 +4113,7 @@ function App() {
       setSuccessMessage('')
 
       const response = await fetch(
-        'http://localhost:8080/admin/backup/database'
+        `${API_BASE_URL}/admin/backup/database`
       )
 
       if (!response.ok) {
@@ -3918,28 +4179,123 @@ function App() {
     }
   }
 
-  const runProjectionCommand = useEffectEvent(
-    (command) => {
-      if (command === 'NEXT') {
-        nextSection()
-        return
-      }
+  function markExplicitSend() {
+    if (networkProjectorRef.current?.mode !== 'local' && !networkProjectorRef.current?.ready) {
+      networkSendRef.current = null
+      setError('Projector server is not connected. Reconnect, then Send Live again.')
+      return
+    }
+    const send = { id: projectorId(), issuedAt: Date.now() }
+    networkSendRequestRef.current = send.id
+    networkSendRef.current = send.id
+    setLiveSend(send)
+  }
 
-      if (command === 'PREVIOUS') {
-        previousSection()
-        return
+  async function publishNetworkSnapshot(snapshot, requestId) {
+    const transport = networkProjectorRef.current
+    const connection = transport?.connection
+    try {
+      if (snapshot.backgroundType === 'custom' && !snapshot.customBackgroundData) {
+        const record = await loadBackgroundImage(snapshot.customBackgroundId)
+        snapshot.customBackgroundData = await networkBackgroundFile(record?.file)
       }
-
-      if (command === 'BLACK') {
-        toggleBlackScreen()
-        return
+      if (networkSendRequestRef.current !== requestId) return
+      if (!transport?.ready || transport.connection !== connection) {
+        throw new Error('Projector connection changed. Send Live again when connected.')
       }
+      transport.command('SEND_LIVE', snapshot)
+    } catch (err) {
+      setError(err.message || 'Could not prepare the projector background.')
+    }
+  }
 
-      if (command === 'CLEAR') {
-        toggleClearLyrics()
+  function networkCommand(action, payload) {
+    return networkProjectorRef.current?.command(action, payload) ?? false
+  }
+
+  const receiveNetworkState = useEffectEvent((state, meta) => {
+    if (!state) return
+    if (state.backgroundType) projectorBackgroundSyncedRef.current = true
+    if (isProjectorWindow) {
+      if (meta.appearanceOnly) {
+        setProjectorWindowState(current => ({
+          ...current, ...projectorAppearanceState(state),
+          customBackgroundData: state.customBackgroundData,
+          ...(meta.action === 'BACKGROUND_CHANGE' ? {} : { projectionMode: state.projectionMode === 'BLACK' ? 'BLACK' : 'CLEAR' }),
+        }))
+      } else {
+        setProjectorWindowState({ ...state, projectionSettings: normalizeProjectionSettings(state.projectionSettings) })
+      }
+      return
+    }
+    setProjectionContentType(state.projectionContentType || PROJECTION_CONTENT_TYPES.SONG)
+    setProjectionSong(state.projectionSong || null)
+    setProjectedBiblePassage(state.projectedBiblePassage || null)
+    setProjectedBibleVerseIndex(state.projectedBibleVerseIndex || 0)
+    setProjectedNote(state.projectedNote || '')
+    setProjectedNoteHeading(state.projectedNoteHeading || {})
+    setNoteNavigation(state.noteNavigation || [])
+    setProjectedEvents(state.projectedEvents || [])
+    setProjectedEvent(state.projectedEvent || null)
+    setProjectedEventPageIndex(state.projectedEventPageIndex || 0)
+    setSectionIndex(state.sectionIndex || 0)
+    setProjectionMode(state.projectionMode || 'CLEAR')
+    setLiveSend(state.liveSend || null)
+    if (['NEXT', 'PREVIOUS', 'SECTION_CHANGE', 'BIBLE_VERSE_JUMP'].includes(meta.action)) {
+      if (isCurrentSongLive && state.projectionSong?.id === currentSongResolved?.id) {
+        setCurrentSongSectionIndex(state.sectionIndex || 0)
+      }
+      if ((isPreparedBibleLive || (meta.action === 'BIBLE_VERSE_JUMP' && previewBiblePassage?.bookKey === state.projectedBiblePassage?.bookKey && previewBiblePassage?.chapter === state.projectedBiblePassage?.chapter)) && state.projectedBiblePassage?.verses?.[state.projectedBibleVerseIndex]) {
+        selectPreparedBibleVerse(state.projectedBiblePassage.verses[state.projectedBibleVerseIndex].verseNumber)
       }
     }
-  )
+    if (state.backgroundType) {
+      setBackgroundType(state.backgroundType)
+      setBackgroundVariant(state.backgroundVariant)
+      setCustomBackgroundId(state.customBackgroundId || null)
+      setCustomBackgroundName(state.customBackgroundName || '')
+      setNetworkBackgroundData(state.customBackgroundData || null)
+    }
+  })
+
+  useEffect(() => {
+    const transport = createNetworkProjector({
+      baseUrl: API_BASE_URL,
+      role: isProjectorWindow ? 'PROJECTOR' : 'OPERATOR',
+      onState: receiveNetworkState,
+      onStatus: setNetworkStatus,
+      onError: message => { if (!isProjectorWindow) setError(message) },
+    })
+    networkProjectorRef.current = transport
+    return () => { transport.close(); networkProjectorRef.current = null }
+  }, [isProjectorWindow])
+
+  const runProjectionCommand = useEffectEvent((command) => {
+    const networkAction = { BLACK: 'BLACK_SCREEN', CLEAR: 'CLEAR_LYRICS', BIBLE_NEXT: 'NEXT', BIBLE_PREVIOUS: 'PREVIOUS' }[command] || command
+    if (networkCommand(networkAction)) return
+    if (command === 'BLACK') { toggleBlackScreen(); return }
+    if (command === 'CLEAR') { toggleClearLyrics(); return }
+    const direction = command === 'NEXT' || command === 'BIBLE_NEXT' || command === 'NOTE_PAGE_NEXT' ? 1
+      : command === 'PREVIOUS' || command === 'BIBLE_PREVIOUS' || command === 'NOTE_PAGE_PREVIOUS' ? -1 : 0
+    if (!direction) return
+    if (projectionContentType === PROJECTION_CONTENT_TYPES.EVENT) {
+      moveProjectedEventPage(direction)
+    } else if (projectionContentType === PROJECTION_CONTENT_TYPES.BIBLE) {
+      navigateProjectedBibleVerse(direction)
+      if (isPreparedBibleLive) {
+        const next = projectedBiblePassage?.verses?.[projectedBibleVerseIndex + direction]
+        if (next) selectPreparedBibleVerse(next.verseNumber)
+      }
+    } else if (projectionContentType === PROJECTION_CONTENT_TYPES.NOTE) {
+      scrollLiveNote(direction, command.startsWith('NOTE_PAGE') ? 'page' : 'line')
+    } else {
+      const next = sectionIndex + direction
+      const sections = parseLyricsSections(liveProjectionSong)
+      if (next < 0 || next >= sections.length) return
+      setSectionIndex(next)
+      if (isCurrentSongLive) setCurrentSongSectionIndex(next)
+    }
+  })
 
   const scrollOperatorContent = useEffectEvent(
     (direction) => {
@@ -3968,15 +4324,15 @@ function App() {
   )
 
   useEffect(() => {
+    loadSettings()
     if (isProjectorWindow) {
       return
     }
-
-    loadSettings()
     loadBibleTranslations()
     loadSongs()
     loadPlaylists()
     loadServicePlans()
+    loadEvents()
   }, [isProjectorWindow])
 
   useEffect(() => {
@@ -3997,6 +4353,14 @@ function App() {
       return undefined
     }
 
+    if (!isProjectorWindow) {
+      projectorConnectionRef.current = createProjectorConnection(() => {
+        const url = new URL(window.location.href)
+        url.searchParams.set('projector', '1')
+        return window.open(url.toString(), 'church-song-projector-window', 'popup=yes,width=1280,height=720')
+      })
+    }
+
     if ('BroadcastChannel' in window) {
       projectorChannelRef.current =
         new BroadcastChannel(
@@ -4006,6 +4370,7 @@ function App() {
       projectorChannelRef.current.addEventListener(
         'message',
         (event) => {
+          if (networkProjectorRef.current?.mode !== 'local') return
           if (
             !isProjectorWindow &&
             event.data?.type ===
@@ -4019,6 +4384,7 @@ function App() {
 
           if (
             isProjectorWindow ||
+            !projectorSyncReadyRef.current ||
             event.data?.type !==
               PROJECTOR_REQUEST_MESSAGE
           ) {
@@ -4035,6 +4401,8 @@ function App() {
     }
 
     return () => {
+      projectorConnectionRef.current?.close()
+      projectorConnectionRef.current = null
       projectorChannelRef.current?.close()
       projectorChannelRef.current = null
     }
@@ -4048,10 +4416,23 @@ function App() {
     let channel = null
 
     const applyProjectorState = (state) => {
+      if (networkProjectorRef.current?.mode !== 'local') return
       if (!state) {
         return
       }
 
+      if (state.appearanceOnly) {
+        projectorBackgroundSyncedRef.current = true
+        setProjectorWindowState(current => ({
+          ...current,
+          ...projectorAppearanceState(state),
+          ...(state.projectorControl ? { projectionMode: state.projectorControl.mode } : {}),
+        }))
+        return
+      }
+
+      state = projectorStartupGate(state)
+      projectorBackgroundSyncedRef.current = true
       setProjectorWindowState({
         projectionSong:
           state.projectionSong || null,
@@ -4065,6 +4446,13 @@ function App() {
         projectedBibleVerseIndex:
           state.projectedBibleVerseIndex ||
           0,
+        projectedNote: state.projectedNote || '',
+        projectedNoteHeading: state.projectedNoteHeading || {},
+        noteNavigation: state.noteNavigation || [],
+        liveSend: state.liveSend,
+        projectedEvent: state.projectedEvent || null,
+        projectedEvents: state.projectedEvents || [],
+        projectedEventPageIndex: state.projectedEventPageIndex || 0,
         projectionMode:
           state.projectionMode || 'CLEAR',
         backgroundType:
@@ -4127,37 +4515,13 @@ function App() {
       }
     }
 
-    const handleProjectorKeyDown = (event) => {
-      if (shouldIgnoreProjectionShortcut(event)) {
-        return
-      }
-
-      const command =
-        getProjectionShortcutCommand(event)
-
-      if (!command || !channel) {
-        return
-      }
-
-      event.preventDefault()
-      channel.postMessage(
-        createProjectorCommandMessage(command)
-      )
-    }
-
     window.addEventListener(
       'storage',
       handleStorage
     )
-    document.addEventListener(
-      'keydown',
-      handleProjectorKeyDown,
-      true
-    )
 
-    applyProjectorState(
-      readStoredProjectorState()
-    )
+
+    const stopProjectorPresence = announceProjectorReady()
 
     const requestTimer = window.setTimeout(
       () => {
@@ -4169,16 +4533,12 @@ function App() {
     )
 
     return () => {
+      stopProjectorPresence()
       window.clearTimeout(requestTimer)
       channel?.close()
       window.removeEventListener(
         'storage',
         handleStorage
-      )
-      document.removeEventListener(
-        'keydown',
-        handleProjectorKeyDown,
-        true
       )
     }
   }, [isProjectorWindow])
@@ -4227,77 +4587,36 @@ function App() {
     projectorWindowState.customBackgroundId,
   ])
 
-  useEffect(() => {
-    const storedProjectorState =
-      readStoredProjectorState()
-
-    if (
-      hasRestorableProjectorSession(
-        storedProjectorState
-      )
-    ) {
-      return
-    }
-
-    setBackgroundType('preset')
-    setBackgroundVariant(
-      appSettings.defaultBackground
-    )
-    setCustomBackgroundId(null)
-    setCustomBackgroundName('')
-  }, [appSettings.defaultBackground])
-
   async function loadSettings() {
+    const requestVersion = ++settingsRequestVersionRef.current
     try {
-      const response = await fetch(
-        'http://localhost:8080/settings'
-      )
-
-      if (!response.ok) {
-        throw new Error(
-          'Failed to load settings'
-        )
-      }
-
-      const data = await response.json()
-      const normalizedSettings =
-        createSettingsForm(data)
-
+      const response = await fetch(`${API_BASE_URL}/settings`, { cache: 'no-store' })
+      if (!response.ok) throw new Error('Failed to load settings')
+      const normalizedSettings = createSettingsForm(await response.json())
+      if (requestVersion !== settingsRequestVersionRef.current) return
       setAppSettings(normalizedSettings)
       setSettingsForm(normalizedSettings)
-    } catch (err) {
-      setAppSettings(
-        normalizeAppSettings(
-          DEFAULT_APP_SETTINGS
-        )
-      )
-      setSettingsForm(
-        createSettingsForm(
-          DEFAULT_APP_SETTINGS
-        )
-      )
-
-      if (
-        err instanceof TypeError &&
-        err.message === 'Failed to fetch'
-      ) {
-        setError(
-          'Could not load settings. Using built-in defaults.'
-        )
-        return
+      const cached = readStoredProjectorState()
+      // Uploaded images keep their existing IndexedDB/session descriptor.
+      // Preset selection is authoritative in Settings, regardless of live content.
+      const hasCustomBackground = cached?.backgroundType === 'custom' && cached.customBackgroundId
+      if (!hasCustomBackground && !(networkProjectorRef.current?.mode === 'network' && projectorBackgroundSyncedRef.current) && !(isProjectorWindow && projectorBackgroundSyncedRef.current)) {
+        applySavedBackground(normalizedSettings.defaultBackground)
       }
-
-      setError(
-        err.message ||
-          'Could not load settings. Using built-in defaults.'
-      )
+    } catch (err) {
+      // Keep the last cached background when the API is unavailable.
+      if (requestVersion === settingsRequestVersionRef.current) {
+        setError(err.message || 'Could not load settings. Keeping the last saved projector background.')
+      }
+    } finally {
+      if (requestVersion === settingsRequestVersionRef.current) setSettingsLoaded(true)
     }
   }
 
   async function loadBibleTranslations() {
     try {
       const response = await fetch(
-        'http://localhost:8080/bible/translations'
+        `${API_BASE_URL}/bible/translations`
       )
 
       if (!response.ok) {
@@ -4372,7 +4691,7 @@ function App() {
         translation: translationCode,
       })
       const response = await fetch(
-        `http://localhost:8080/bible/books?${query.toString()}`
+        `${API_BASE_URL}/bible/books?${query.toString()}`
       )
 
       if (!response.ok) {
@@ -4468,7 +4787,7 @@ function App() {
     }
 
     const request = fetch(
-      `http://localhost:8080/songs/${songId}/melody-reference`
+      `${API_BASE_URL}/songs/${songId}/melody-reference`
     )
       .then(async (response) => {
         if (response.status === 204) {
@@ -4575,6 +4894,39 @@ function App() {
     }
   }
 
+  async function fetchBibleChapterMetadata(
+    {
+      bookKey,
+      chapter,
+    },
+    translationCode
+  ) {
+    const response = await fetch(
+      `${API_BASE_URL}/bible/books/${bookKey}/chapters/${chapter}/metadata?${new URLSearchParams({ translation: translationCode }).toString()}`
+    )
+
+    if (!response.ok) {
+      const message = await readErrorMessage(response)
+
+      throw new Error(
+        message ||
+          'Could not load Bible chapter metadata.'
+      )
+    }
+
+    const data = await response.json()
+    const availableVerseNumbers = Array.isArray(
+      data.availableVerseNumbers
+    )
+      ? data.availableVerseNumbers
+      : []
+
+    return {
+      ...data,
+      availableVerseNumbers,
+    }
+  }
+
   async function loadBibleChapterMetadata(
     {
       bookKey,
@@ -4589,30 +4941,15 @@ function App() {
     }
 
     try {
-      const response = await fetch(
-        `http://localhost:8080/bible/books/${bookKey}/chapters/${chapter}/metadata?${new URLSearchParams({ translation: translationCode }).toString()}`
+      const metadata = await fetchBibleChapterMetadata(
+        { bookKey, chapter },
+        translationCode
       )
-
-      if (!response.ok) {
-        const message =
-          await readErrorMessage(response)
-
-        throw new Error(
-          message ||
-            'Could not load Bible chapter metadata.'
-        )
-      }
-
-      const data = await response.json()
       const availableVerseNumbers =
-        Array.isArray(
-          data.availableVerseNumbers
-        )
-          ? data.availableVerseNumbers
-          : []
+        metadata.availableVerseNumbers
 
       setSelectedBibleChapterMetadata({
-        ...data,
+        ...metadata,
         availableVerseNumbers,
       })
       setBibleSelection((current) => {
@@ -4643,6 +4980,11 @@ function App() {
           endVerse: nextEndVerse,
         }
       })
+
+      return {
+        ...metadata,
+        availableVerseNumbers,
+      }
     } catch (err) {
       setSelectedBibleChapterMetadata(null)
 
@@ -4755,9 +5097,139 @@ function App() {
     )
   }
 
+  function selectPreparedBibleVerse(verseNumber) {
+    setBibleSelection((current) => ({
+      ...current,
+      startVerse: verseNumber,
+      endVerse: verseNumber,
+    }))
+
+    window.requestAnimationFrame(() => {
+      bibleConsoleVerseRefs.current
+        .get(verseNumber)
+        ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
+  }
+
+  function moveBiblePreviewVerse(direction) {
+    const currentIndex = selectedBibleVerseOptions.indexOf(
+      bibleSelection.startVerse
+    )
+    const nextIndex = currentIndex + direction
+
+    if (
+      nextIndex < 0 ||
+      nextIndex >= selectedBibleVerseOptions.length
+    ) {
+      return
+    }
+
+    selectPreparedBibleVerse(
+      selectedBibleVerseOptions[nextIndex]
+    )
+  }
+
+  function goToPreviousBibleVerse() {
+    const currentIndex = selectedBibleVerseOptions.indexOf(
+      bibleSelection.startVerse
+    )
+
+    if (currentIndex > 0) {
+      selectPreparedBibleVerse(
+        selectedBibleVerseOptions[currentIndex - 1]
+      )
+      return
+    }
+
+    if (bibleSelection.chapter > 1) {
+      const previousChapter = bibleSelection.chapter - 1
+
+      setPreviewBiblePassageData(null)
+      setBibleSelection((current) => ({
+        ...current,
+        chapter: previousChapter,
+        startVerse: 1,
+        endVerse: 1,
+      }))
+
+      loadBibleChapterMetadata({
+        bookKey: bibleSelection.bookKey,
+        chapter: previousChapter,
+      }).then((metadata) => {
+        const lastVerse = metadata?.availableVerseNumbers?.at(-1)
+
+        if (lastVerse) {
+          selectPreparedBibleVerse(lastVerse)
+        }
+      })
+    }
+  }
+
+  function goToNextBibleVerse() {
+    const currentIndex = selectedBibleVerseOptions.indexOf(
+      bibleSelection.startVerse
+    )
+
+    if (
+      currentIndex >= 0 &&
+      currentIndex < selectedBibleVerseOptions.length - 1
+    ) {
+      selectPreparedBibleVerse(
+        selectedBibleVerseOptions[currentIndex + 1]
+      )
+      return
+    }
+
+    if (
+      bibleSelection.chapter <
+      (selectedBibleBook?.chapterCount || 0)
+    ) {
+      const nextChapter = bibleSelection.chapter + 1
+
+      setPreviewBiblePassageData(null)
+      setBibleSelection((current) => ({
+        ...current,
+        chapter: nextChapter,
+        startVerse: 1,
+        endVerse: 1,
+      }))
+    }
+  }
+
   async function previewBiblePassageSelection() {
     if (!selectedBibleBook) {
       return
+    }
+
+    const availableVerseNumbers =
+      selectedBibleChapterMetadata?.availableVerseNumbers ||
+      []
+    const firstVerse = availableVerseNumbers[0] || 1
+    const startVerse = availableVerseNumbers.includes(
+      bibleSelection.startVerse
+    )
+      ? bibleSelection.startVerse
+      : firstVerse
+    const validEndVerses =
+      getContiguousBibleEndVerseOptions(
+        availableVerseNumbers,
+        startVerse
+      )
+    const endVerse = validEndVerses.includes(
+      bibleSelection.endVerse
+    )
+      ? bibleSelection.endVerse
+      : startVerse
+
+    if (
+      startVerse !== bibleSelection.startVerse ||
+      endVerse !== bibleSelection.endVerse
+    ) {
+      setBibleSelection((current) => ({
+        ...current,
+        startVerse,
+        endVerse,
+      }))
     }
 
     try {
@@ -4769,16 +5241,16 @@ function App() {
           bibleSelection.chapter
         ),
         startVerse: String(
-          bibleSelection.startVerse
+          startVerse
         ),
         endVerse: String(
-          bibleSelection.endVerse
+          endVerse
         ),
         translation:
           referenceBibleTranslationCode,
       })
       const response = await fetch(
-        `http://localhost:8080/bible/passage?${query.toString()}`
+        `${API_BASE_URL}/bible/passage?${query.toString()}`
       )
 
       if (!response.ok) {
@@ -4818,105 +5290,107 @@ function App() {
   }
 
   async function loadBiblePassageSet(
-    startVerse,
-    endVerse
+    selection = bibleSelection,
+    projectionMode = bibleProjectionMode,
+    referenceTranslationCode =
+      referenceBibleTranslationCode
   ) {
-    const query = new URLSearchParams({
-      book: bibleSelection.bookKey,
-      chapter: String(
-        bibleSelection.chapter
-      ),
-      startVerse: String(startVerse),
-      endVerse: String(endVerse),
-    })
-    const [
-      frenchResponse,
-      englishResponse,
-      spanishResponse,
-    ] = await Promise.all([
-      fetch(
-        `http://localhost:8080/bible/passage?${new URLSearchParams({
-          ...Object.fromEntries(
-            query.entries()
-          ),
-          translation:
-            BIBLE_TRANSLATION_CODES.FRENCH,
-        }).toString()}`
-      ),
-      fetch(
-        `http://localhost:8080/bible/passage?${new URLSearchParams({
-          ...Object.fromEntries(
-            query.entries()
-          ),
-          translation:
-            BIBLE_TRANSLATION_CODES.ENGLISH,
-        }).toString()}`
-      ),
-      fetch(
-        `http://localhost:8080/bible/passage?${new URLSearchParams({
-          ...Object.fromEntries(
-            query.entries()
-          ),
-          translation:
-            BIBLE_TRANSLATION_CODES.SPANISH,
-        }).toString()}`
-      ),
-    ])
+    const requiredTranslations =
+      projectionMode === BIBLE_PROJECTION_MODES.FRENCH
+        ? [BIBLE_TRANSLATION_CODES.FRENCH]
+        : projectionMode === BIBLE_PROJECTION_MODES.ENGLISH
+          ? [BIBLE_TRANSLATION_CODES.ENGLISH]
+          : projectionMode === BIBLE_PROJECTION_MODES.SPANISH
+            ? [BIBLE_TRANSLATION_CODES.SPANISH]
+            : [
+                BIBLE_TRANSLATION_CODES.FRENCH,
+                BIBLE_TRANSLATION_CODES.ENGLISH,
+              ]
+    const translationsToLoad = [
+      ...new Set([
+        ...requiredTranslations,
+        referenceTranslationCode,
+      ]),
+    ]
+    const passages = await Promise.all(
+      translationsToLoad.map(async (translation) => {
+        const metadata =
+          await fetchBibleChapterMetadata(
+            selection,
+            translation
+          )
+        const availableVerseNumbers =
+          metadata.availableVerseNumbers
+        const startVerse = availableVerseNumbers[0]
+        const endVerse =
+          availableVerseNumbers[
+            availableVerseNumbers.length - 1
+          ]
 
-    if (!frenchResponse.ok) {
-      const message =
-        await readErrorMessage(
-          frenchResponse
+        if (
+          !Number.isInteger(startVerse) ||
+          !Number.isInteger(endVerse)
+        ) {
+          throw new Error(
+            'Could not determine the available verses for this Bible chapter.'
+          )
+        }
+
+        const response = await fetch(
+          `${API_BASE_URL}/bible/passage?${new URLSearchParams({
+            book: selection.bookKey,
+            chapter: String(selection.chapter),
+            startVerse: String(startVerse),
+            endVerse: String(endVerse),
+            translation,
+          }).toString()}`
         )
 
-      throw new Error(
-        message ||
-          'Could not load the French Bible passage.'
-      )
-    }
+        if (!response.ok) {
+          throw new Error(
+            (await readErrorMessage(response)) ||
+              `Could not load the ${translation} Bible passage.`
+          )
+        }
 
-    if (!englishResponse.ok) {
-      const message =
-        await readErrorMessage(
-          englishResponse
-        )
-
-      throw new Error(
-        message ||
-          'Could not load the English Bible passage.'
-      )
-    }
-
-    if (!spanishResponse.ok) {
-      const message =
-        await readErrorMessage(
-          spanishResponse
-        )
-
-      throw new Error(
-        message ||
-          'Could not load the Spanish Bible passage.'
-      )
-    }
-
-    const [
-      frenchPassage,
-      englishPassage,
-      spanishPassage,
-    ] = await Promise.all([
-      frenchResponse.json(),
-      englishResponse.json(),
-      spanishResponse.json(),
-    ])
+        return [translation, await response.json()]
+      })
+    )
+    const passagesByTranslation = Object.fromEntries(passages)
 
     return {
-      frenchPassage,
-      englishPassage,
-      spanishPassage,
+      frenchPassage:
+        passagesByTranslation[BIBLE_TRANSLATION_CODES.FRENCH] || null,
+      englishPassage:
+        passagesByTranslation[BIBLE_TRANSLATION_CODES.ENGLISH] || null,
+      spanishPassage:
+        passagesByTranslation[BIBLE_TRANSLATION_CODES.SPANISH] || null,
     }
   }
 
-  async function projectBiblePassage() {
+  function navigateProjectedBibleVerse(direction) {
+    if (networkCommand(direction > 0 ? 'NEXT' : 'PREVIOUS')) return
+    if (
+      projectionContentType !== PROJECTION_CONTENT_TYPES.BIBLE ||
+      !projectedBiblePassage?.verses?.length
+    ) {
+      return
+    }
+
+    setProjectedBibleVerseIndex((currentIndex) => {
+      const nextIndex = currentIndex + direction
+
+      return nextIndex < 0 ||
+        nextIndex >= projectedBiblePassage.verses.length
+        ? currentIndex
+        : nextIndex
+    })
+    setProjectionMode('LIVE')
+  }
+
+  async function projectBiblePassage({
+    singleVerse = false,
+  } = {}) {
     if (
       !previewBiblePassage ||
       !previewBiblePassage.verses?.length
@@ -4924,33 +5398,57 @@ function App() {
       return
     }
 
-    const availableVerseNumbers =
-      selectedBibleChapterMetadata?.availableVerseNumbers ||
-      []
-    const chapterFirstVerse =
-      availableVerseNumbers[0]
-    const chapterLastVerse =
-      availableVerseNumbers[
-        availableVerseNumbers.length - 1
-      ]
-
-    if (
-      !Number.isInteger(chapterFirstVerse) ||
-      !Number.isInteger(chapterLastVerse)
-    ) {
-      setError(
-        'Could not determine the available verses for this Bible chapter.'
-      )
-      return
-    }
-
     try {
       setError('')
 
+      const currentChapterMetadata =
+        await loadBibleChapterMetadata(
+          {
+            bookKey: bibleSelection.bookKey,
+            chapter: bibleSelection.chapter,
+          },
+          referenceBibleTranslationCode
+        )
+      const availableVerseNumbers =
+        currentChapterMetadata?.availableVerseNumbers || []
+      const chapterFirstVerse =
+        availableVerseNumbers[0]
+      const chapterLastVerse =
+        availableVerseNumbers[
+          availableVerseNumbers.length - 1
+        ]
+
+      if (
+        !Number.isInteger(chapterFirstVerse) ||
+        !Number.isInteger(chapterLastVerse)
+      ) {
+        throw new Error(
+          'Could not determine the available verses for this Bible chapter.'
+        )
+      }
+
+      const preparedVerse = availableVerseNumbers.includes(
+        bibleSelection.startVerse
+      )
+        ? bibleSelection.startVerse
+        : chapterFirstVerse
+
+      if (
+        singleVerse &&
+        preparedVerse !== bibleSelection.startVerse
+      ) {
+        setBibleSelection((current) => ({
+          ...current,
+          startVerse: preparedVerse,
+          endVerse: preparedVerse,
+        }))
+      }
+
       const chapterPassageData =
         await loadBiblePassageSet(
-          chapterFirstVerse,
-          chapterLastVerse
+          bibleSelection,
+          bibleProjectionMode,
+          referenceBibleTranslationCode
         )
       const chapterBiblePassage =
         createBiblePreviewPassage({
@@ -4961,6 +5459,8 @@ function App() {
             chapterPassageData.englishPassage,
           spanishPassage:
             chapterPassageData.spanishPassage,
+          referenceTranslationCode:
+            referenceBibleTranslationCode,
         })
 
       if (
@@ -4976,7 +5476,7 @@ function App() {
         chapterBiblePassage.verses.findIndex(
           (verse) =>
             verse.verseNumber ===
-            bibleSelection.startVerse
+            preparedVerse
         )
 
       if (
@@ -5012,6 +5512,7 @@ function App() {
           : 0
       )
       setProjectionMode('LIVE')
+      markExplicitSend()
     } catch (err) {
       if (
         err instanceof TypeError &&
@@ -5054,12 +5555,16 @@ function App() {
         spanishPassage:
           projectedBiblePassage.translations
             ?.SPANISH || null,
+        referenceTranslationCode:
+          projectedBiblePassage.referenceTranslationCode ||
+          referenceBibleTranslationCode,
       })
 
     if (
       nextProjectedBiblePassage?.verses
         ?.length
     ) {
+      if (networkCommand('BIBLE_MODE_CHANGE', { passage: nextProjectedBiblePassage })) return
       setProjectedBiblePassage(
         nextProjectedBiblePassage
       )
@@ -5089,6 +5594,7 @@ function App() {
       )
       setProjectionMode('LIVE')
       lastSongProjectionRef.current = null
+      if (networkProjectorRef.current?.mode === 'network') markExplicitSend()
       return
     }
 
@@ -5101,6 +5607,7 @@ function App() {
       setProjectionSong(currentSongResolved)
       setSectionIndex(0)
       setProjectionMode('LIVE')
+      if (networkProjectorRef.current?.mode === 'network') markExplicitSend()
       return
     }
 
@@ -5117,7 +5624,7 @@ function App() {
   async function loadSongs() {
     try {
       const response = await fetch(
-        'http://localhost:8080/songs'
+        `${API_BASE_URL}/songs`
       )
 
       if (!response.ok) {
@@ -5172,7 +5679,7 @@ function App() {
   async function loadPlaylists() {
     try {
       const response = await fetch(
-        'http://localhost:8080/playlists'
+        `${API_BASE_URL}/playlists`
       )
 
       if (!response.ok) {
@@ -5264,10 +5771,195 @@ function App() {
     }
   }
 
+  async function loadEvents() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/events`)
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response) || 'Could not load events.')
+      }
+      setEvents(await response.json())
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  function openNewEventModal() {
+    setError('')
+    setEditingEventId(null)
+    setEventForm(createBlankEventForm())
+    setShowEventModal(true)
+  }
+
+  function openEditEventModal(event) {
+    setError('')
+    setEditingEventId(event.id)
+    setEventForm({
+      title: event.title || '', eventDate: event.eventDate || '', endDate: event.endDate || '',
+      startTime: event.startTime || '', endTime: event.endTime || '',
+      hostName: event.hostName || '', location: event.location || '', description: event.description || '',
+      eventType: event.eventType || '',
+      birthdayMonth: event.birthdayMonth || new Date().getMonth() + 1,
+      displayYear: event.displayYear || '',
+      birthdayEntries: (event.birthdayEntries || []).map((person) => ({ ...person })),
+      titleColor: event.titleColor || '#000000',
+      dateColor: event.dateColor || '#8B3A8B',
+      detailsColor: event.detailsColor || '#000000',
+      titleBold: event.titleBold || false,
+      titleUnderline: event.titleUnderline || false,
+      titleItalic: event.titleItalic || false,
+      dateBold: event.dateBold ?? true,
+      dateUnderline: event.dateUnderline ?? true,
+      dateItalic: event.dateItalic || false,
+      detailsBold: event.detailsBold || false,
+      detailsUnderline: event.detailsUnderline || false,
+      detailsItalic: event.detailsItalic || false,
+    })
+    setShowEventModal(true)
+  }
+
+  async function saveEvent() {
+    if (!isBirthdayList(eventForm)) {
+      const dateError = validateEventDates(eventForm.eventDate, eventForm.endDate)
+      if (dateError) {
+        setError(dateError)
+        return
+      }
+    }
+    try {
+      setError('')
+      const response = await fetch(
+        editingEventId == null
+          ? `${API_BASE_URL}/events`
+          : `${API_BASE_URL}/events/${editingEventId}`,
+        {
+          method: editingEventId == null ? 'POST' : 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(isBirthdayList(eventForm) ? {
+            eventType: BIRTHDAY_LIST,
+            title: `Birthdays for the Month of ${MONTH_NAMES[Number(eventForm.birthdayMonth) - 1]}`,
+            birthdayMonth: Number(eventForm.birthdayMonth),
+            displayYear: eventForm.displayYear === '' ? null : Number(eventForm.displayYear),
+            birthdayEntries: sortBirthdays(eventForm.birthdayEntries).map((person) => ({
+              name: person.name, month: Number(eventForm.birthdayMonth),
+              day: Number(person.day), birthYear: person.birthYear === '' || person.birthYear == null ? null : Number(person.birthYear),
+            })),
+          } : { ...eventForm, endDate: eventForm.endDate || null, hostName: eventForm.hostName.trim() || null }),
+        }
+      )
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response) || 'Could not save event.')
+      }
+      setShowEventModal(false)
+      await loadEvents()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function deleteEvent(event) {
+    if (!window.confirm(`Delete event "${event.title}"?`)) return
+    try {
+      setError('')
+      const response = await fetch(`${API_BASE_URL}/events/${event.id}`, { method: 'DELETE' })
+      if (!response.ok) throw new Error(await readErrorMessage(response) || 'Could not delete event.')
+      await loadEvents()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function projectEvent() {
+    if (eventSendInFlightRef.current) return
+    eventSendInFlightRef.current = true
+    setIsSendingEvents(true)
+    try {
+      setError('')
+      // Read saved data directly: the post-save list reload may still be pending.
+      const response = await fetch(`${API_BASE_URL}/events`, { cache: 'no-store' })
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response) || 'Could not load events for projection.')
+      }
+      const savedEvents = await response.json()
+      const eventSet = eventPresentation === 'upcoming'
+        ? selectedEvents(savedEvents.filter((event) => !isBirthdayList(event) && isUpcomingEvent(event, getLocalIsoDate())), selectedEventIds)
+          .sort((a, b) => a.eventDate.localeCompare(b.eventDate) || (a.startTime || '').localeCompare(b.startTime || ''))
+        : savedEvents.filter((event) => isBirthdayList(event) && String(event.id) === eventPresentation)
+      if (eventPresentation === 'upcoming' && selectedEventIds !== null && !eventSet.length) throw new Error('Select at least one upcoming event before sending.')
+      if (eventPresentation !== 'upcoming' && !eventPageCount(eventSet)) {
+        throw new Error('The selected Birthday List is unavailable or empty.')
+      }
+      // Detached from saved/form data; only explicit sends replace this snapshot.
+      const snapshot = JSON.parse(JSON.stringify(eventSet))
+      await ensureProjectorReady()
+      setEvents(savedEvents)
+      setSentEventSelectionVersion(eventSelectionVersion)
+      setProjectionContentType(PROJECTION_CONTENT_TYPES.EVENT)
+      setProjectionSong(null)
+      setProjectedBiblePassage(null)
+      setProjectedBibleVerseIndex(0)
+      setProjectedEvent(snapshot[0] || null)
+      setProjectedEvents(snapshot)
+      setActiveKeyboardPanel('EVENTS_LIST')
+      setProjectedEventPageIndex(0)
+      setEventSnapshotVersion((version) => Math.max(Date.now(), version + 1))
+      setProjectionMode('LIVE')
+      markExplicitSend()
+    } catch (err) {
+      setError(err.message || 'Could not send events to projector.')
+    } finally {
+      eventSendInFlightRef.current = false
+      setIsSendingEvents(false)
+    }
+  }
+
+  async function sendNoteLive(text, heading = {}) {
+    if (noteValidation(text)) throw new Error(noteValidation(text))
+    const transport = networkProjectorRef.current
+    if (transport?.mode !== 'local' && !transport?.ready) throw new Error('Projector server is not connected. Reconnect and send again.')
+    if (!transport.supportsContent(PROJECTION_CONTENT_TYPES.NOTE)) throw new Error('This running projector server does not advertise Notes support. Restart the backend with the updated Notes build, then refresh this operator and Send Note Live again.')
+    await ensureProjectorReady()
+    setProjectedNote(text)
+    setProjectedNoteHeading({...heading})
+    setNoteNavigation([])
+    setProjectionContentType(PROJECTION_CONTENT_TYPES.NOTE)
+    setProjectionSong(null); setProjectedBiblePassage(null); setProjectedBibleVerseIndex(0)
+    setProjectedEvents([]); setProjectedEvent(null); setProjectedEventPageIndex(0); setSectionIndex(0)
+    setProjectionMode('LIVE')
+    markExplicitSend()
+  }
+
+  function scrollLiveNote(direction, unit = 'line') {
+    if (projectionContentType !== PROJECTION_CONTENT_TYPES.NOTE || !liveSend) return
+    if (networkCommand(unit === 'page' ? (direction > 0 ? 'NOTE_PAGE_NEXT' : 'NOTE_PAGE_PREVIOUS') : (direction > 0 ? 'NEXT' : 'PREVIOUS'))) return
+    setNoteNavigation(previous => nextNoteNavigation(previous, direction, unit))
+  }
+
+  function jumpLiveBibleVerse(event) {
+    event.preventDefault()
+    const index = projectionContentType === PROJECTION_CONTENT_TYPES.BIBLE && liveSend
+      ? liveVerseIndex(projectedBiblePassage, verseJump) : -1
+    if (index < 0) { setVerseJumpError('Enter a verse number in the currently live passage.'); return }
+    setVerseJumpError('')
+    if (networkCommand('BIBLE_VERSE_JUMP', { verseNumber: Number(verseJump) })) return
+    setProjectedBibleVerseIndex(index); setProjectionMode('LIVE')
+    if (previewBiblePassage?.bookKey === projectedBiblePassage.bookKey && previewBiblePassage?.chapter === projectedBiblePassage.chapter) {
+      selectPreparedBibleVerse(projectedBiblePassage.verses[index].verseNumber)
+    }
+  }
+
+  function moveProjectedEventPage(direction) {
+    if (networkCommand(direction > 0 ? 'NEXT' : 'PREVIOUS')) return
+    if (projectionContentType !== PROJECTION_CONTENT_TYPES.EVENT) return
+    setProjectedEventPageIndex((index) => {
+      const next = index + direction
+      return next < 0 || next >= eventPageCount(projectedEvents) ? index : next
+    })
+  }
+
   async function loadServicePlans() {
     try {
       const response = await fetch(
-        'http://localhost:8080/service-plans'
+        `${API_BASE_URL}/service-plans`
       )
 
       if (!response.ok) {
@@ -5715,6 +6407,8 @@ function App() {
             ? previewBiblePassageData?.referencePassage ||
               null
             : null,
+        referenceTranslationCode:
+          referenceBibleTranslationCode,
       }),
     [
       previewBiblePassageData,
@@ -5821,8 +6515,71 @@ function App() {
   const liveProjectionSong =
     previewProjectionContentType ===
     PROJECTION_CONTENT_TYPES.SONG
-      ? projectionSongResolved
+      ? (networkStatus.mode === 'network' ? projectionSong : projectionSongResolved)
       : null
+  const liveProjectorState = useMemo(
+    () =>
+      ({ ...createProjectorState({
+        song: liveProjectionSong,
+        sectionIndex,
+        projectionContentType,
+        biblePassage: projectedBiblePassage,
+        bibleVerseIndex: projectedBibleVerseIndex,
+        note: projectedNote,
+        noteHeading: projectedNoteHeading,
+        noteNavigation,
+        event: projectedEvent,
+        events: projectedEvents,
+        eventPageIndex: projectedEventPageIndex,
+        eventSnapshotVersion,
+        projectionMode,
+        backgroundType,
+        backgroundVariant,
+        customBackgroundId,
+        customBackgroundName,
+        projectionSettings,
+      }), liveSend }),
+    [
+      liveSend,
+      backgroundType,
+      backgroundVariant,
+      customBackgroundId,
+      customBackgroundName,
+      liveProjectionSong,
+      projectedBiblePassage,
+      projectedBibleVerseIndex,
+      projectedNote,
+      projectedNoteHeading,
+      noteNavigation,
+      projectedEvent,
+      projectedEvents,
+      projectedEventPageIndex,
+      eventSnapshotVersion,
+      projectionContentType,
+      projectionMode,
+      projectionSettings,
+      sectionIndex,
+    ]
+  )
+  const liveEventPresentation = projectionContentType === PROJECTION_CONTENT_TYPES.EVENT
+    ? (isBirthdayList(projectedEvents[0]) ? String(projectedEvents[0].id) : 'upcoming') : null
+  const isPreparedEventsLive = eventPresentation === liveEventPresentation && (eventPresentation !== 'upcoming' || eventSelectionVersion === sentEventSelectionVersion)
+  const operatorEvents = isPreparedEventsLive ? projectedEvents : selectedEventPresentation
+  const operatorEventPage = isPreparedEventsLive ? projectedEventPageIndex
+    : Math.min(preparedEventPages[eventPresentation] || 0, Math.max(0, eventPageCount(operatorEvents) - 1))
+  const operatorKeyboardMode = activeKeyboardPanel === 'SIDE_NAV' ? 'SIDE_NAV' : ['songs', 'playlists', 'serviceHistory'].includes(activeView) && activeKeyboardPanel === 'ADMIN_LIST' ? 'ADMIN_LIST' : activeView === 'events' && activeKeyboardPanel === 'EVENTS_LIST' ? 'EVENTS_LIST' : (activeView === 'events' || activeView === 'operator') && ['EVENTS', 'BIRTHDAYS'].includes(activeKeyboardPanel)
+    ? (eventPresentation === 'upcoming' ? 'REGULAR_EVENTS' : 'BIRTHDAY_LIST')
+    : activeView === 'operator' ? (activeKeyboardPanel === 'CURRENT_SONG'
+      ? (prepareMode === 'notes' ? 'NOTE' : prepareMode === 'bible' ? 'BIBLE' : 'SONG') : activeKeyboardPanel) : null
+  const isEventsKeyboardMode = operatorKeyboardMode === 'EVENTS_LIST' || operatorKeyboardMode === 'REGULAR_EVENTS' || operatorKeyboardMode === 'BIRTHDAY_LIST'
+  const isPreparedBibleLive = projectionContentType === PROJECTION_CONTENT_TYPES.BIBLE &&
+    previewBiblePassage?.bookKey === projectedBiblePassage?.bookKey &&
+    previewBiblePassage?.chapter === projectedBiblePassage?.chapter &&
+    projectedBiblePassage?.verses?.[projectedBibleVerseIndex]?.verseNumber === bibleSelection.startVerse &&
+    projectedBiblePassage?.referenceTranslationCode === referenceBibleTranslationCode
+  const canKeyboardSend = isEventsKeyboardMode ? selectedEventPageCount > 0 && !isSendingEvents
+    : activeView === 'operator' ? (prepareMode === 'notes' ? false : prepareMode === 'bible' ? Boolean(previewBiblePassage?.verses?.length) : Boolean(currentSongResolved && currentSongSections.length)) : false
+
   const isCurrentSongLive =
     projectionContentType ===
       PROJECTION_CONTENT_TYPES.SONG &&
@@ -5865,27 +6622,38 @@ function App() {
         projectedBiblePassage.verses[0] ||
         null
       : null
-  const stagedProjectorSong = currentSongResolved
-  const stagedProjectorContentType =
-    stagedProjectorSong
-      ? PROJECTION_CONTENT_TYPES.SONG
-      : previewProjectionContentType
-  const stagedProjectorSectionIndex =
-    currentSongSectionIndex
-  const stagedProjectorPreviewMode =
-    stagedProjectorSong ? 'LIVE' : projectionMode
-  const projectorPreviewSections = useMemo(() => {
-    if (!stagedProjectorSong) {
+  const liveProjectorPreviewSections = useMemo(() => {
+    if (
+      !liveProjectorState.projectionSong ||
+      liveProjectorState.projectionContentType !==
+        PROJECTION_CONTENT_TYPES.SONG
+    ) {
       return []
     }
 
-    return parseLyricsSections(stagedProjectorSong)
-  }, [stagedProjectorSong])
-  const projectorPreviewSection =
-    projectorPreviewSections[
-      stagedProjectorSectionIndex
+    return parseLyricsSections(
+      liveProjectorState.projectionSong
+    )
+  }, [
+    liveProjectorState.projectionContentType,
+    liveProjectorState.projectionSong,
+  ])
+  const liveProjectorPreviewSection =
+    liveProjectorPreviewSections[
+      liveProjectorState.sectionIndex
     ] ||
-    projectorPreviewSections[0]
+    liveProjectorPreviewSections[0]
+  const liveProjectorBibleVerse =
+    liveProjectorState.projectionContentType ===
+    PROJECTION_CONTENT_TYPES.BIBLE
+      ? liveProjectorState.projectedBiblePassage
+          ?.verses?.[
+          liveProjectorState.projectedBibleVerseIndex
+        ] ||
+        liveProjectorState.projectedBiblePassage
+          ?.verses?.[0] ||
+        null
+      : null
   const currentSongSelectionId =
     currentSongSourceId ??
     currentSongResolved?.id ??
@@ -6183,7 +6951,7 @@ function App() {
         )
 
         const response = await fetch(
-          `http://localhost:8080/song-families/${familyId}/versions`
+          `${API_BASE_URL}/song-families/${familyId}/versions`
         )
 
         if (response.status === 404) {
@@ -6218,7 +6986,7 @@ function App() {
           'Could not load translation information.',
           {
             method: 'GET',
-            url: `http://localhost:8080/song-families/${familyId}/versions`,
+            url: `${API_BASE_URL}/song-families/${familyId}/versions`,
             error: err,
           }
         )
@@ -6376,49 +7144,53 @@ function App() {
   ])
 
   useEffect(() => {
-    if (isProjectorWindow) {
+    if (isProjectorWindow || !settingsLoaded) {
       return
     }
 
-    const nextProjectorState =
-      createProjectorState({
-        song: liveProjectionSong,
-        sectionIndex,
-        projectionContentType,
-        biblePassage:
-          projectedBiblePassage,
-        bibleVerseIndex:
-          projectedBibleVerseIndex,
-        projectionMode,
-        backgroundType,
-        backgroundVariant,
-        customBackgroundId,
-        customBackgroundName,
-        projectionSettings,
-      })
+    if (networkProjectorRef.current?.mode !== 'local') {
+      if (networkSendRef.current && networkSendRef.current === liveSend?.id) {
+        networkSendRef.current = null
+        publishNetworkSnapshot(JSON.parse(JSON.stringify({
+          ...liveProjectorState,
+          songSectionCount: parseLyricsSections(liveProjectorState.projectionSong).length,
+          customBackgroundData: networkBackgroundData,
+        })), liveSend.id)
+      }
+      return
+    }
+    projectorSyncReadyRef.current = true
+    // No live authority survives an operator reload. Keep appearance in sync,
+    // but do not publish restored/prepared content until an explicit Send Live.
+    const syncState = liveSend ? liveProjectorState : {
+      ...projectorAppearanceState(liveProjectorState),
+      appearanceOnly: true,
+      projectorControl,
+    }
+    latestProjectorStateRef.current = syncState
 
-    latestProjectorStateRef.current =
-      nextProjectorState
-
-    persistProjectorState(nextProjectorState)
+    if ([PROJECTION_CONTENT_TYPES.EVENT, PROJECTION_CONTENT_TYPES.NOTE].includes(liveProjectorState.projectionContentType)) {
+      try {
+        persistProjectorState(syncState)
+      } catch {
+        console.warn('Projector storage is unavailable; continuing with BroadcastChannel synchronization.')
+      }
+    } else {
+      persistProjectorState(syncState)
+    }
     projectorChannelRef.current?.postMessage(
       createProjectorSyncMessage(
-        nextProjectorState
+        syncState
       )
     )
   }, [
     isProjectorWindow,
-    backgroundType,
-    backgroundVariant,
-    customBackgroundId,
-    customBackgroundName,
-    projectionContentType,
-    projectionSettings,
-    projectionMode,
-    projectedBiblePassage,
-    projectedBibleVerseIndex,
-    liveProjectionSong,
-    sectionIndex,
+    settingsLoaded,
+    liveProjectorState,
+    liveSend,
+    projectorControl,
+    networkStatus,
+    networkBackgroundData,
   ])
 
   function handleNewSongChange(event) {
@@ -6566,7 +7338,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        'http://localhost:8080/songs',
+        `${API_BASE_URL}/songs`,
         {
           method: 'POST',
 
@@ -6762,7 +7534,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/song-families/from-song/${selectedSongResolved.id}`,
+        `${API_BASE_URL}/song-families/from-song/${selectedSongResolved.id}`,
         {
           method: 'POST',
         }
@@ -6813,7 +7585,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/song-families/${linkExistingSongTargetFamilyId}/songs/${song.id}`,
+        `${API_BASE_URL}/song-families/${linkExistingSongTargetFamilyId}/songs/${song.id}`,
         {
           method: 'POST',
         }
@@ -6875,7 +7647,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/song-families/${familyId}/songs/${song.id}`,
+        `${API_BASE_URL}/song-families/${familyId}/songs/${song.id}`,
         {
           method: 'DELETE',
         }
@@ -6932,7 +7704,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/songs/${editingSongId}`,
+        `${API_BASE_URL}/songs/${editingSongId}`,
         {
           method: 'PUT',
 
@@ -7072,7 +7844,7 @@ function App() {
       formData.append('file', file)
 
       const response = await fetch(
-        `http://localhost:8080/songs/${selectedSongResolved.id}/melody-reference`,
+        `${API_BASE_URL}/songs/${selectedSongResolved.id}/melody-reference`,
         {
           method: 'POST',
           body: formData,
@@ -7131,7 +7903,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/songs/${selectedSongResolved.id}/melody-reference`,
+        `${API_BASE_URL}/songs/${selectedSongResolved.id}/melody-reference`,
         {
           method: 'DELETE',
         }
@@ -7272,7 +8044,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/songs/${addTranslationSourceSongId}/translations`,
+        `${API_BASE_URL}/songs/${addTranslationSourceSongId}/translations`,
         {
           method: 'POST',
           headers: {
@@ -7430,7 +8202,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/songs/${editingSectionsSongId}/sections`,
+        `${API_BASE_URL}/songs/${editingSectionsSongId}/sections`,
         {
           method: 'PUT',
           headers: {
@@ -7541,7 +8313,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/playlists/id/${playlist.id}/songs/${song.id}`,
+        `${API_BASE_URL}/playlists/id/${playlist.id}/songs/${song.id}`,
         {
           method: 'POST',
         }
@@ -7595,7 +8367,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/service-plans/${servicePlan.id}/songs/${song.id}`,
+        `${API_BASE_URL}/service-plans/${servicePlan.id}/songs/${song.id}`,
         {
           method: 'POST',
         }
@@ -7662,7 +8434,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/songs/${selectedSong.id}`,
+        `${API_BASE_URL}/songs/${selectedSong.id}`,
         {
           method: 'DELETE',
         }
@@ -7800,7 +8572,7 @@ function App() {
       setSuccessMessage('')
 
       const response = await fetch(
-        'http://localhost:8080/service-plans',
+        `${API_BASE_URL}/service-plans`,
         {
           method: 'POST',
           headers: {
@@ -7881,7 +8653,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/service-plans/${openedServicePlan.id}`,
+        `${API_BASE_URL}/service-plans/${openedServicePlan.id}`,
         {
           method: 'PUT',
           headers: {
@@ -7942,7 +8714,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/service-plans/${openedServicePlan.id}/duplicate`,
+        `${API_BASE_URL}/service-plans/${openedServicePlan.id}/duplicate`,
         {
           method: 'POST',
           headers: {
@@ -8004,7 +8776,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/service-plans/${openedServicePlan.id}`,
+        `${API_BASE_URL}/service-plans/${openedServicePlan.id}`,
         {
           method: 'DELETE',
         }
@@ -8063,7 +8835,7 @@ function App() {
       setSuccessMessage('')
 
       const response = await fetch(
-        `http://localhost:8080/service-plans/history/${servicePlanToDelete.id}`,
+        `${API_BASE_URL}/service-plans/history/${servicePlanToDelete.id}`,
         {
           method: 'DELETE',
         }
@@ -8178,8 +8950,8 @@ function App() {
 
       const response = await fetch(
         target.type === 'service-plan'
-          ? `http://localhost:8080/service-plans/${target.servicePlan.id}/complete`
-          : `http://localhost:8080/playlists/${target.playlist.id}/complete-service`,
+          ? `${API_BASE_URL}/service-plans/${target.servicePlan.id}/complete`
+          : `${API_BASE_URL}/playlists/${target.playlist.id}/complete-service`,
         {
           method: 'POST',
         }
@@ -8334,7 +9106,7 @@ function App() {
       setSuccessMessage('')
 
       const response = await fetch(
-        `http://localhost:8080/service-plans/${selectedHistoryServicePlan.id}/reuse`,
+        `${API_BASE_URL}/service-plans/${selectedHistoryServicePlan.id}/reuse`,
         {
           method: 'POST',
           headers: {
@@ -8364,7 +9136,7 @@ function App() {
       const reusedWorkingPlaylist =
         await response.json()
       const playlistsResponse = await fetch(
-        'http://localhost:8080/playlists'
+        `${API_BASE_URL}/playlists`
       )
 
       if (!playlistsResponse.ok) {
@@ -8526,8 +9298,8 @@ function App() {
       setSuccessMessage('')
 
       const endpoint = copyingPlaylist
-        ? `http://localhost:8080/playlists/${savedPlaylistSource.id}/copy`
-        : 'http://localhost:8080/playlists/saved-service'
+        ? `${API_BASE_URL}/playlists/${savedPlaylistSource.id}/copy`
+        : `${API_BASE_URL}/playlists/saved-service`
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
@@ -8551,7 +9323,7 @@ function App() {
 
       const createdPlaylist = await response.json()
       const refreshedResponse = await fetch(
-        'http://localhost:8080/playlists'
+        `${API_BASE_URL}/playlists`
       )
 
       if (!refreshedResponse.ok) {
@@ -8621,7 +9393,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/playlists/${managedPlaylist.id}/metadata`,
+        `${API_BASE_URL}/playlists/${managedPlaylist.id}/metadata`,
         {
           method: 'PUT',
           headers: {
@@ -8740,7 +9512,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/playlists/${managedPlaylist.id}`,
+        `${API_BASE_URL}/playlists/${managedPlaylist.id}`,
         {
           method: 'DELETE',
         }
@@ -8862,7 +9634,7 @@ function App() {
       setSuccessMessage('')
 
       const response = await fetch(
-        `http://localhost:8080/playlists/${useForTodaySourcePlaylist.id}/use-for-today-service`,
+        `${API_BASE_URL}/playlists/${useForTodaySourcePlaylist.id}/use-for-today-service`,
         {
           method: 'POST',
           headers: {
@@ -8892,7 +9664,7 @@ function App() {
         await response.json()
 
       const refreshedResponse = await fetch(
-        'http://localhost:8080/playlists'
+        `${API_BASE_URL}/playlists`
       )
 
       if (!refreshedResponse.ok) {
@@ -8950,7 +9722,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/playlists/id/${playlist.id}/songs/${song.id}`,
+        `${API_BASE_URL}/playlists/id/${playlist.id}/songs/${song.id}`,
         {
           method: 'DELETE',
         }
@@ -9011,7 +9783,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/service-plans/${servicePlan.id}/songs/${song.id}`,
+        `${API_BASE_URL}/service-plans/${servicePlan.id}/songs/${song.id}`,
         {
           method: 'DELETE',
         }
@@ -9073,7 +9845,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/playlists/id/${playlist.id}/songs/reorder?fromIndex=${fromIndex}&toIndex=${toIndex}`,
+        `${API_BASE_URL}/playlists/id/${playlist.id}/songs/reorder?fromIndex=${fromIndex}&toIndex=${toIndex}`,
         {
           method: 'PUT',
         }
@@ -9135,7 +9907,7 @@ function App() {
       setError('')
 
       const response = await fetch(
-        `http://localhost:8080/service-plans/${servicePlan.id}/songs/reorder?fromIndex=${fromIndex}&toIndex=${toIndex}`,
+        `${API_BASE_URL}/service-plans/${servicePlan.id}/songs/reorder?fromIndex=${fromIndex}&toIndex=${toIndex}`,
         {
           method: 'PUT',
         }
@@ -9191,6 +9963,7 @@ function App() {
       currentSongSectionIndex
     )
     setProjectionMode('LIVE')
+    markExplicitSend()
   }
 
   function selectPlaylistSong(song) {
@@ -9198,6 +9971,7 @@ function App() {
       return
     }
 
+    setPrepareMode('song')
     const nextSong =
       resolveOperatorPreviewSong(song, {
         applySessionDefaults:
@@ -9251,29 +10025,27 @@ function App() {
     setCurrentSongSourceId(
       resolvedSong.id
     )
-    setProjectionContentType(
-      PROJECTION_CONTENT_TYPES.SONG
-    )
-    setProjectedBiblePassage(null)
-    setProjectedBibleVerseIndex(0)
-    setProjectionSong(resolvedSong)
-    setSectionIndex(nextSectionIndex)
   }
 
   function showLyrics() {
+    if (networkCommand('SHOW_LYRICS')) return
+    setProjectorControl({ mode: 'LIVE' })
     setProjectionMode('LIVE')
   }
 
   function clearLiveProjectionLyrics() {
+    if (networkCommand('CLEAR_LYRICS', { clear: true })) return
     if (projectionMode === 'BLACK') {
       previousVisibleModeRef.current = 'CLEAR'
       return
     }
 
+    setProjectorControl({ mode: 'CLEAR' })
     setProjectionMode('CLEAR')
   }
 
   function toggleClearLyrics() {
+    if (networkCommand('CLEAR_LYRICS')) return
     if (projectionMode === 'BLACK') {
       previousVisibleModeRef.current =
         previousVisibleModeRef.current ===
@@ -9284,6 +10056,7 @@ function App() {
     }
 
     if (projectionMode === 'CLEAR') {
+      setProjectorControl({ mode: 'LIVE' })
       setProjectionMode('LIVE')
       return
     }
@@ -9292,11 +10065,13 @@ function App() {
   }
 
   function toggleBlackScreen() {
+    if (networkCommand('BLACK_SCREEN')) return
     if (projectionMode === 'BLACK') {
       if (currentSong) {
         setSelectedSong(currentSong)
       }
 
+      setProjectorControl({ mode: previousVisibleModeRef.current })
       setProjectionMode(
         previousVisibleModeRef.current
       )
@@ -9305,14 +10080,21 @@ function App() {
 
     previousVisibleModeRef.current =
       projectionMode
+    setProjectorControl({ mode: 'BLACK' })
     setProjectionMode('BLACK')
   }
 
   function previousSection() {
+    if (prepareMode === 'bible') {
+      moveBiblePreviewVerse(-1)
+      return
+    }
+
     if (
       previewProjectionContentType ===
       PROJECTION_CONTENT_TYPES.BIBLE
     ) {
+      if (networkCommand('PREVIOUS')) return
       if (projectedBibleVerseIndex > 0) {
         setProjectedBibleVerseIndex(
           (current) => current - 1
@@ -9331,10 +10113,16 @@ function App() {
   }
 
   function nextSection() {
+    if (prepareMode === 'bible') {
+      moveBiblePreviewVerse(1)
+      return
+    }
+
     if (
       previewProjectionContentType ===
       PROJECTION_CONTENT_TYPES.BIBLE
     ) {
+      if (networkCommand('NEXT')) return
       if (
         projectedBibleVerseIndex <
         (projectedBiblePassage?.verses
@@ -9388,68 +10176,53 @@ function App() {
             nextSectionIndex
           )
 
+    if (networkCommand('SECTION_CHANGE', { index: liveSectionIndex })) return
     setSectionIndex(liveSectionIndex)
     setProjectionMode((currentMode) =>
       getNavigationProjectionMode(currentMode)
     )
   }
 
-  function openProjectorWindow() {
-    if (typeof window === 'undefined') {
-      return
+  async function ensureProjectorReady() {
+    const transport = networkProjectorRef.current
+    if (transport?.mode !== 'local') {
+      if (!transport?.ready) throw new Error('Projector server is not connected.')
+      if (transport.projectors > 0) return
+      if (!['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)) {
+        throw new Error('Open the projector display on the Windows computer, then Send Live.')
+      }
     }
-
-    const nextProjectorState =
-      createProjectorState({
-        song: liveProjectionSong,
-        sectionIndex,
-        projectionContentType,
-        biblePassage:
-          projectedBiblePassage,
-        bibleVerseIndex:
-          projectedBibleVerseIndex,
-        projectionMode,
-        backgroundType,
-        backgroundVariant,
-        customBackgroundId,
-        customBackgroundName,
-        projectionSettings,
-      })
-
-    latestProjectorStateRef.current =
-      nextProjectorState
-
-    persistProjectorState(nextProjectorState)
-    projectorChannelRef.current?.postMessage(
-      createProjectorSyncMessage(
-        nextProjectorState
-      )
-    )
-
-    const projectorUrl = new URL(
-      window.location.href
-    )
-
-    projectorUrl.searchParams.set(
-      'projector',
-      '1'
-    )
-
-    projectorWindowRef.current =
-      window.open(
-        projectorUrl.toString(),
-        'church-song-projector-window',
-        'popup=yes,width=1280,height=720'
-      )
-
-    projectorWindowRef.current?.focus()
+    await projectorConnectionRef.current.ensureReady()
+    if (transport?.mode === 'network') {
+      const deadline = Date.now() + 5000
+      while (!transport.projectors && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50))
+      if (!transport.projectors) throw new Error('Projector has not connected to the server. Try Send Live again.')
+    }
   }
 
-  function selectPresetBackground(
-    variantId
-  ) {
-    setBackgroundType('preset')
-    setBackgroundVariant(variantId)
+  async function openProjectorWindow() {
+    try {
+      await ensureProjectorReady()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function selectPresetBackground(variantId) {
+    if (!settingsLoaded) return
+    try {
+      setError('')
+      ++settingsRequestVersionRef.current
+      const saved = await persistApplicationSettings({ ...appSettings, defaultBackground: variantId })
+      setAppSettings(saved)
+      setSettingsForm((current) => ({ ...current, defaultBackground: saved.defaultBackground }))
+      networkCommand('BACKGROUND_CHANGE', { backgroundType: 'preset', backgroundVariant: saved.defaultBackground, customBackgroundData: null, customBackgroundId: null, customBackgroundName: '' })
+      applySavedBackground(saved.defaultBackground)
+    } catch (err) {
+      setError(err.message || 'Could not save projector background.')
+    } finally {
+      setSettingsLoaded(true)
+    }
   }
 
   async function handleBackgroundUpload(
@@ -9464,6 +10237,10 @@ function App() {
     try {
       setError('')
 
+      let imageData = null
+      if (networkProjectorRef.current?.mode === 'network') {
+        imageData = await networkBackgroundFile(file)
+      }
       const uploadId =
         typeof crypto !== 'undefined' &&
         crypto.randomUUID
@@ -9483,6 +10260,9 @@ function App() {
         savedBackground.fileName
       )
       setBackgroundType('custom')
+      setNetworkBackgroundData(imageData)
+      networkCommand('BACKGROUND_CHANGE', { backgroundType: 'custom', customBackgroundId: savedBackground.id,
+        customBackgroundName: savedBackground.fileName, customBackgroundData: imageData })
     } catch (err) {
       setError(
         'Failed to store background image'
@@ -9492,59 +10272,157 @@ function App() {
     }
   }
 
-  useLayoutEffect(() => {
-    if (
-      isProjectorWindow ||
-      typeof window === 'undefined'
-    ) {
-      return undefined
-    }
+  function activateSideNav(event) {
+    const item = event.target.closest?.('.side-link')
+    if (!item) return
+    const items = Array.from(sideNavRef.current.querySelectorAll('.side-link'))
+    setSidebarKeyboardIndex(items.indexOf(item))
+    setActiveKeyboardPanel('SIDE_NAV')
+  }
 
-    const handleKeyDown = (event) => {
-      if (shouldIgnoreProjectionShortcut(event)) {
+  function activateAdminKeyboardList(event) {
+    if (!['songs', 'playlists', 'serviceHistory'].includes(activeView)) return
+    const list = event.target.closest?.('.song-list, .playlist-management-list')
+      || event.target.closest?.('section')?.querySelector('.song-list, .playlist-management-list')
+    if (!list) return
+    adminKeyboardListRef.current = list
+    setActiveKeyboardPanel('ADMIN_LIST')
+  }
+
+  function activateEventsKeyboardPanel(event) {
+    if (activeView !== 'events' || event.target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="spinbutton"], [role="slider"], [role="listbox"], .modal-overlay, [aria-modal="true"]')) return
+    setActiveKeyboardPanel('EVENTS_LIST')
+  }
+
+  const handlePresentationKey = useEffectEvent((event) => {
+    const mode = isProjectorWindow
+      ? presentationMode(projectorWindowState.projectionContentType, projectorWindowState.projectedEvents)
+      : operatorKeyboardMode
+    const command = keyboardShortcut(event, {
+      mode, canSend: canKeyboardSend, publicWindow: isProjectorWindow,
+      modalOpen: Boolean(document.querySelector('.modal-overlay, [aria-modal="true"], dialog[open]')),
+    })
+    if (!command) return
+    if (isProjectorWindow) {
+      if (networkCommand({ BLACK: 'BLACK_SCREEN', CLEAR: 'CLEAR_LYRICS' }[command] || command)) {
+        event.preventDefault()
         return
       }
-
-      if (
-        event.key === 'ArrowDown' ||
-        event.key === 'ArrowUp'
-      ) {
-        const didScroll = scrollOperatorContent(
-          event.key === 'ArrowDown' ? 1 : -1
-        )
-
-        if (didScroll) {
-          event.preventDefault()
-        }
-
-        return
-      }
-
-      const command =
-        getProjectionShortcutCommand(event)
-
-      if (!command) {
-        return
-      }
-
+      if (!projectorChannelRef.current) return
       event.preventDefault()
-      runProjectionCommand(command)
+      projectorChannelRef.current.postMessage(createProjectorCommandMessage(command))
+      return
     }
-
-    document.addEventListener(
-      'keydown',
-      handleKeyDown,
-      true
-    )
-
-    return () => {
-      document.removeEventListener(
-        'keydown',
-        handleKeyDown,
-        true
-      )
+    if (command.startsWith('ADMIN_')) {
+      const list = adminKeyboardListRef.current
+      if (!list?.isConnected) return
+      const items = Array.from(list.querySelectorAll('.song-item, .playlist-management-item'))
+      const selected = items.findIndex((item) => item.classList.contains('selected') || item.classList.contains('active'))
+      const index = command === 'ADMIN_SELECT' ? selected : selected < 0 ? 0
+        : Math.max(0, Math.min(items.length - 1, selected + (command === 'ADMIN_NEXT' ? 1 : -1)))
+      const item = items[index]
+      if (!item) return
+      event.preventDefault()
+      event.stopPropagation()
+      // Reuse the row's existing selection action; never invoke nested controls.
+      item.click()
+      item.focus({ preventScroll: true })
+      item.scrollIntoView({ block: 'nearest' })
+      return
     }
-  }, [isProjectorWindow])
+    if (command.startsWith('EVENT_LIST_')) {
+      event.preventDefault()
+      const index = managementEvents.findIndex((item) => item.id === highlightedEventId)
+      if (command === 'EVENT_LIST_EDIT') {
+        if (index >= 0) openEditEventModal(managementEvents[index])
+        return
+      }
+      const nextIndex = index < 0 ? 0 : Math.max(0, Math.min(managementEvents.length - 1, index + (command === 'EVENT_LIST_NEXT' ? 1 : -1)))
+      const item = managementEvents[nextIndex]
+      if (!item) return
+      setHighlightedEventId(item.id)
+      Array.from(document.querySelectorAll('[data-keyboard-event]')).find((node) => node.dataset.keyboardEvent === String(item.id))?.scrollIntoView({ block: 'nearest' })
+      return
+    }
+    if (command.startsWith('SIDEBAR_')) {
+      event.preventDefault()
+      event.stopPropagation()
+      const items = Array.from(sideNavRef.current?.querySelectorAll('.side-link') || [])
+      if (command === 'SIDEBAR_OPEN') {
+        items[sidebarKeyboardIndex]?.click()
+      } else {
+        const index = Math.max(0, Math.min(items.length - 1, sidebarKeyboardIndex + (command === 'SIDEBAR_NEXT' ? 1 : -1)))
+        setSidebarKeyboardIndex(index)
+        items[index]?.scrollIntoView({ block: 'nearest' })
+      }
+      return
+    }
+    if (['LIBRARY_NEXT', 'LIBRARY_PREVIOUS', 'SERVICE_NEXT', 'SERVICE_PREVIOUS', 'LIBRARY_SELECT', 'SERVICE_SELECT'].includes(command)) {
+      event.preventDefault()
+      event.stopPropagation()
+      const library = command.startsWith('LIBRARY_')
+      const items = library ? filteredSongs : playlistSongs
+      const selectedId = library ? selectedSong?.id : highlightedServiceSongId
+      const index = items.findIndex((song) => song.id === selectedId)
+      if (command.endsWith('_SELECT')) {
+        if (library && index >= 0) addSelectedSongToConsoleCollection()
+        else if (!library && index >= 0) selectPlaylistSong(items[index])
+        return
+      }
+      const nextIndex = index < 0 ? 0 : Math.max(0, Math.min(items.length - 1, index + (command.endsWith('_NEXT') ? 1 : -1)))
+      const song = items[nextIndex]
+      if (!song) return
+      if (library) setSelectedSong(song)
+      else setHighlightedServiceSongId(song.id)
+      const panel = document.querySelector(library ? '.library-card' : '.service-card')
+      Array.from(panel?.querySelectorAll('[data-keyboard-song]') || []).find((node) => node.dataset.keyboardSong === String(song.id))?.scrollIntoView({ block: 'nearest' })
+      return
+    }
+    if (command === 'SCROLL_UP' || command === 'SCROLL_DOWN') {
+      if (scrollOperatorContent(command === 'SCROLL_DOWN' ? 1 : -1)) event.preventDefault()
+      return
+    }
+    event.preventDefault()
+    if (command === 'BLACK') { toggleBlackScreen(); return }
+    if (command === 'CLEAR') { toggleClearLyrics(); return }
+    if (command === 'SEND') {
+      if (keyboardSendInFlightRef.current) return
+      keyboardSendInFlightRef.current = true
+      Promise.resolve().then(() => {
+        if (isEventsKeyboardMode) return projectEvent()
+        if (prepareMode === 'bible') return projectBiblePassage({ singleVerse: true })
+        return projectSong(currentSong)
+      }).finally(() => { keyboardSendInFlightRef.current = false })
+      return
+    }
+    const direction = command === 'NEXT' || command === 'NOTE_PAGE_NEXT' ? 1 : -1
+    if (mode === 'EVENTS_LIST' || mode === 'REGULAR_EVENTS' || mode === 'BIRTHDAY_LIST') {
+      if (isPreparedEventsLive) moveProjectedEventPage(direction)
+      else setPreparedEventPages((pages) => ({ ...pages,
+        [eventPresentation]: Math.max(0, Math.min(operatorEventPage + direction, eventPageCount(operatorEvents) - 1)),
+      }))
+    } else if (mode === 'NOTE') {
+      scrollLiveNote(direction, command.startsWith('NOTE_PAGE') ? 'page' : 'line')
+    } else if (mode === 'SONG') {
+      moveOperatorPreviewSection(direction)
+    } else if (mode === 'BIBLE') {
+      if (isPreparedBibleLive) {
+        const next = projectedBiblePassage.verses[projectedBibleVerseIndex + direction]
+        if (next) {
+          // In LAN mode the server echo advances both live and prepared positions together.
+          // Optimistic selection would temporarily detach the keyboard from live navigation.
+          if (networkProjectorRef.current?.mode === 'local') selectPreparedBibleVerse(next.verseNumber)
+          navigateProjectedBibleVerse(direction)
+        }
+      } else moveBiblePreviewVerse(direction)
+    }
+  })
+
+  useEffect(() => {
+    const handleKeyDown = (event) => handlePresentationKey(event)
+    document.addEventListener('keydown', handleKeyDown, true)
+    return () => document.removeEventListener('keydown', handleKeyDown, true)
+  }, [])
 
   if (isProjectorWindow) {
     return (
@@ -9564,6 +10442,13 @@ function App() {
         bibleVerseIndex={
           projectorWindowState.projectedBibleVerseIndex
         }
+        note={projectorWindowState.projectedNote}
+        noteHeading={projectorWindowState.projectedNoteHeading}
+        noteNavigation={projectorWindowState.noteNavigation}
+        liveSendId={projectorWindowState.liveSend?.id}
+        event={projectorWindowState.projectedEvent}
+        events={projectorWindowState.projectedEvents}
+        eventPageIndex={projectorWindowState.projectedEventPageIndex}
         projectionMode={
           projectorWindowState.projectionMode
         }
@@ -9574,7 +10459,7 @@ function App() {
           projectorWindowState.backgroundVariant
         }
         customBackgroundUrl={
-          customBackgroundUrl
+          projectorWindowState.customBackgroundData || customBackgroundUrl
         }
         projectionSettings={
           projectorWindowState.projectionSettings
@@ -9588,19 +10473,19 @@ function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-logo">
+          <div className="brand-logo" title={appSettings.churchName}>
             {appSettings.churchAbbreviation}
           </div>
 
           <div className="brand-copy">
-            <h1>
-              {appSettings.churchName}
-            </h1>
+            <h1>BOC WorshipView</h1>
+            <p className="product-tagline">Worship • Scripture • Presentation</p>
           </div>
         </div>
 
-        <nav className="side-nav">
+        <nav className="side-nav" ref={sideNavRef} onClickCapture={activateSideNav} onFocusCapture={activateSideNav}>
           <button
+            data-keyboard-highlight={activeKeyboardPanel === 'SIDE_NAV' && sidebarKeyboardIndex === 0}
             className={
               activeView === 'operator'
                 ? 'side-link active'
@@ -9618,6 +10503,7 @@ function App() {
           </button>
 
           <button
+            data-keyboard-highlight={activeKeyboardPanel === 'SIDE_NAV' && sidebarKeyboardIndex === 1}
             className={
               activeView === 'songs'
                 ? 'side-link active'
@@ -9633,23 +10519,16 @@ function App() {
           </button>
 
           <button
-            className={
-              activeView === 'bible'
-                ? 'side-link active'
-                : 'side-link'
-            }
-            onClick={() =>
-              setActiveView('bible')
-            }
+            data-keyboard-highlight={activeKeyboardPanel === 'SIDE_NAV' && sidebarKeyboardIndex === 2}
+            className={activeView === 'events' ? 'side-link active' : 'side-link'}
+            onClick={() => setActiveView('events')}
           >
-            <span className="nav-icon">
-              📖
-            </span>
-
-            Bible
+            <span className="nav-icon">▣</span>
+            Upcoming Events
           </button>
 
           <button
+            data-keyboard-highlight={activeKeyboardPanel === 'SIDE_NAV' && sidebarKeyboardIndex === 3}
             className={
               activeView === 'playlists'
                 ? 'side-link active'
@@ -9667,6 +10546,7 @@ function App() {
           </button>
 
           <button
+            data-keyboard-highlight={activeKeyboardPanel === 'SIDE_NAV' && sidebarKeyboardIndex === 4}
             className={
               activeView ===
               'serviceHistory'
@@ -9687,6 +10567,7 @@ function App() {
           </button>
 
           <button
+            data-keyboard-highlight={activeKeyboardPanel === 'SIDE_NAV' && sidebarKeyboardIndex === 5}
             className={
               activeView ===
               'backupExport'
@@ -9707,6 +10588,7 @@ function App() {
           </button>
 
           <button
+            data-keyboard-highlight={activeKeyboardPanel === 'SIDE_NAV' && sidebarKeyboardIndex === 6}
             className={
               activeView === 'settings'
                 ? 'side-link active'
@@ -9734,10 +10616,26 @@ function App() {
           <p>
             Ready for worship
           </p>
+          <footer className="app-copyright">© 2026 Jean Kennedy Demosthene. All rights reserved.</footer>
         </div>
       </aside>
 
-      <main className="main-area">
+      <main
+        className={`main-area${activeView === 'events' ? ` keyboard-panel${activeKeyboardPanel === 'EVENTS_LIST' ? ' keyboard-panel-active' : ''}` : ''}`}
+        data-keyboard-panel={activeView === 'events' ? activeKeyboardPanel : undefined}
+        onPointerDownCapture={activateEventsKeyboardPanel}
+        onClickCapture={(event) => { activateEventsKeyboardPanel(event); activateAdminKeyboardList(event) }}
+        onFocusCapture={(event) => { activateEventsKeyboardPanel(event); activateAdminKeyboardList(event) }}
+      >
+        {(activeView === 'events' || isEventsKeyboardMode) && (
+          <EventsPageStatus events={operatorEvents} pageIndex={operatorEventPage} live={isPreparedEventsLive} canSend={canKeyboardSend} listNavigation={activeView === 'events'} />
+        )}
+        {activeView === 'operator' && !isEventsKeyboardMode && (
+          <div className="keyboard-status" role="status" aria-live="polite">
+            {activeKeyboardPanel === 'SONG_LIBRARY' ? 'Song Library · ↑ ↓ Select · Enter Add Selected Song' : activeKeyboardPanel === 'WORKING_SERVICE' ? 'Working Service · ↑ ↓ Select · Enter Prepare Song' : prepareMode === 'bible' ? 'Bible · ← → / ↑ ↓ Verses' : `Song${currentSongSections[currentSongSectionIndex] ? ` · ${currentSongSections[currentSongSectionIndex].name}` : ''} · ← → Sections · ↑ ↓ Scroll`}
+            {activeKeyboardPanel === 'CURRENT_SONG' && canKeyboardSend && ' · Enter · Send Live'} · B · Black Screen
+          </div>
+        )}
         {successMessage && (
           <div className="success-message">
             {successMessage}
@@ -9793,8 +10691,15 @@ function App() {
               </div>
             </header>
 
+            <nav className="operator-panel-nav" aria-label="Console panels">
+              <a href="#song-library-panel">Song Library</a>
+              <a href="#working-service-panel">Service</a>
+              <a href="#prepare-panel">Prepare</a>
+              <a href="#live-controls">Live Controls</a>
+            </nav>
+
             <div className="console-grid">
-              <section className="console-card library-card">
+              <section id="song-library-panel" className={`console-card library-card keyboard-panel${activeKeyboardPanel === 'SONG_LIBRARY' ? ' keyboard-panel-active' : ''}`} onPointerDownCapture={() => setActiveKeyboardPanel('SONG_LIBRARY')} onFocusCapture={() => setActiveKeyboardPanel('SONG_LIBRARY')}>
                 <div className="card-header">
                   <div>
                     <p className="card-kicker">
@@ -9862,6 +10767,7 @@ function App() {
                   {filteredSongs.map(
                     (song) => (
                       <button
+                        data-keyboard-song={song.id}
                         key={song.id}
                         ref={(node) => {
                           if (node) {
@@ -9922,7 +10828,7 @@ function App() {
                 </AppScrollArea>
               </section>
 
-              <section className="console-card service-card">
+              <section id="working-service-panel" className={`console-card service-card keyboard-panel${activeKeyboardPanel === 'WORKING_SERVICE' ? ' keyboard-panel-active' : ''}`} onPointerDownCapture={() => setActiveKeyboardPanel('WORKING_SERVICE')} onFocusCapture={() => setActiveKeyboardPanel('WORKING_SERVICE')}>
                 <div className="card-header">
                   <div>
                     <p className="card-kicker">
@@ -10035,9 +10941,11 @@ function App() {
                     {playlistSongs.map(
                       (song, index) => (
                         <div
+                          data-keyboard-song={song.id}
                           key={song.id}
                           className={[
                             'service-song',
+                            highlightedServiceSongId === song.id ? 'keyboard-song-highlight' : '',
                             currentSongSelectionId ===
                             song.id
                               ? 'selected'
@@ -10056,15 +10964,14 @@ function App() {
                           role="button"
                           tabIndex="0"
                           onClick={() => {
+                            setHighlightedServiceSongId(song.id)
                             selectPlaylistSong(song)
                           }}
                           onKeyDown={(event) => {
-                            if (
-                              event.key ===
-                                'Enter' ||
-                              event.key === ' '
-                            ) {
+                            // Enter is routed centrally to the highlighted row.
+                            if (event.key === ' ' && event.target === event.currentTarget) {
                               event.preventDefault()
+                              setHighlightedServiceSongId(song.id)
                               selectPlaylistSong(song)
                             }
                           }}
@@ -10285,15 +11192,54 @@ function App() {
                 </button>
               </section>
 
-              <section className="right-console">
+              <section id="prepare-panel" className={`right-console keyboard-panel${activeKeyboardPanel === 'CURRENT_SONG' ? ' keyboard-panel-active' : ''}`} onPointerDownCapture={() => setActiveKeyboardPanel('CURRENT_SONG')} onFocusCapture={() => setActiveKeyboardPanel('CURRENT_SONG')}>
                 <AppScrollArea
                   className="song-detail-body-shell"
                   viewportClassName="song-detail-body"
                   viewportRef={
                     operatorContentViewportRef
                   }
-                  dependencyKey={`operator-preview-${currentSongResolved?.id || 'none'}-${previewProjectionContentType}-${projectionMode}`}
+                  dependencyKey={`operator-preview-${prepareMode}-${currentSongResolved?.id || 'none'}-${previewProjectionContentType}-${projectionMode}`}
                 >
+                <div className="prepare-workspace-tabs">
+                    <button
+                      type="button"
+                      className={
+                        prepareMode === 'song'
+                          ? 'prepare-workspace-tab active'
+                          : 'prepare-workspace-tab'
+                      }
+                      onClick={() => { setPrepareMode('song'); setActiveKeyboardPanel('CURRENT_SONG') }}
+                    >
+                      Song
+                    </button>
+
+                    <button
+                      type="button"
+                      className={
+                        prepareMode === 'bible'
+                          ? 'prepare-workspace-tab active'
+                          : 'prepare-workspace-tab'
+                      }
+                      onClick={() => { setPrepareMode('bible'); setActiveKeyboardPanel('CURRENT_SONG') }}
+                    >
+                      Bible
+                    </button>
+                    <button type="button" className={`prepare-workspace-tab${prepareMode === 'notes' ? ' active' : ''}`} onClick={() => { setPrepareMode('notes'); setActiveKeyboardPanel('CURRENT_SONG') }}>Notes</button>
+                </div>
+
+                {prepareMode === 'notes' && <NotesPanel
+                  key={loadedServicePlan ? `service-${loadedServicePlan.id}` : selectedPlaylist ? `playlist-${selectedPlaylist.id}` : 'session'}
+                  serviceKey={loadedServicePlan ? `service-${loadedServicePlan.id}` : selectedPlaylist ? `playlist-${selectedPlaylist.id}` : 'session'}
+                  serviceName={consoleCollectionLabel}
+                  onSend={sendNoteLive} onBlack={toggleBlackScreen} onClear={toggleClearLyrics}
+                  noteIsLive={projectionContentType === PROJECTION_CONTENT_TYPES.NOTE && Boolean(liveSend)}
+                  onScroll={scrollLiveNote}
+                  previewBackgroundClass={backgroundType === 'preset' ? `projector-screen-${backgroundVariant}` : 'projector-screen-custom'}
+                  previewBackgroundUrl={backgroundType === 'custom' ? networkBackgroundData || customBackgroundUrl : ''}
+                />}
+
+                {prepareMode === 'song' && (
                 <div className="console-card current-song-card">
                   <div className="current-heading">
                     <div>
@@ -10650,104 +11596,480 @@ function App() {
                         </div>
                       </div>
 
+                      <div className="prepared-song-preview">
+                        <p className="small-title">
+                          Prepared Song Preview
+                        </p>
+
+                        <strong>
+                          {currentSongSections[
+                            currentSongSectionIndex
+                          ]?.name || 'Ready'}
+                        </strong>
+
+                        <ProjectorDisplay
+                          song={currentSongResolved}
+                          sectionIndex={
+                            currentSongSectionIndex
+                          }
+                          projectionMode="LIVE"
+                          backgroundType={backgroundType}
+                          backgroundVariant={
+                            backgroundVariant
+                          }
+                          customBackgroundUrl={
+                            networkBackgroundData || customBackgroundUrl
+                          }
+                          projectionSettings={
+                            projectionSettings
+                          }
+                        />
+
+                        <div className="current-actions">
+                          <button
+                            className="button button-secondary"
+                            onClick={() =>
+                              openEditSongModal(currentSong)
+                            }
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            className="button button-primary"
+                            onClick={() =>
+                              projectSong(currentSong)
+                            }
+                          >
+                            Send to Projector
+                          </button>
+                        </div>
+
+                        <div className="background-selector">
+                          <span className="background-selector-label">
+                            Background
+                          </span>
+                          <div className="background-options">
+                            {BACKGROUND_OPTIONS.map((option) => (
+                              <button
+                                key={option.id}
+                                type="button"
+                                className={[
+                                  'background-option',
+                                  backgroundVariant === option.id
+                                    ? 'active'
+                                    : '',
+                                ]
+                                  .filter(Boolean)
+                                  .join(' ')}
+                                onClick={() =>
+                                  selectPresetBackground(option.id)
+                                }
+                              >
+                                <span className={option.swatchClassName} />
+                                <span className="background-option-name">
+                                  {option.name}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div id="live-controls" className="projection-controls">
+                          <button
+                            className="button button-secondary"
+                            onClick={previousSection}
+                            disabled={!canGoToPreviousProjection}
+                          >
+                            ← Previous
+                          </button>
+                          <button
+                            className="button button-secondary"
+                            onClick={toggleClearLyrics}
+                          >
+                            {projectionMode === 'CLEAR'
+                              ? 'Show Lyrics'
+                              : 'Clear Lyrics'}
+                          </button>
+                          <button
+                            className="button button-secondary"
+                            onClick={toggleBlackScreen}
+                          >
+                            {projectionMode === 'BLACK'
+                              ? 'Show Screen'
+                              : 'Black'}
+                          </button>
+                          <button
+                            className="button button-primary"
+                            onClick={openProjectorWindow}
+                          >
+                            Open Projector
+                          </button>
+                          <button
+                            className="button button-primary"
+                            onClick={nextSection}
+                            disabled={!canGoToNextProjection}
+                          >
+                            Next →
+                          </button>
+                        </div>
+                      </div>
+
                     </>
                   )}
                 </div>
+                  )}
 
+                {prepareMode === 'bible' && (
+                    <div className="console-card bible-prepare-workspace">
+                      <div className="current-heading">
+                        <div>
+                          <p className="card-kicker">
+                            Bible Preparation
+                          </p>
+
+                          <h3>
+                            {previewBiblePassage?.reference ||
+                              'Select a passage'}
+                          </h3>
+                        </div>
+                      </div>
+
+                      <form className="live-verse-jump" onSubmit={jumpLiveBibleVerse}>
+                        <label>Live verse number<input inputMode="numeric" value={verseJump} onChange={event => { setVerseJump(event.target.value); setVerseJumpError('') }} disabled={!isBibleProjectionActive || !liveSend} aria-describedby="verse-jump-status" /></label>
+                        <button className="button button-secondary" disabled={!isBibleProjectionActive || !liveSend}>Go to Verse</button>
+                        <small id="verse-jump-status" role="status">{verseJumpError || (isBibleProjectionActive && liveSend ? `Navigates live: ${projectedBiblePassage.reference}` : 'Send a Bible passage live before using this control.')}</small>
+                      </form>
+                      <div className="bible-form-grid">
+                        <div className="bible-form-field bible-reference-language-field">
+                          <span>Bible Language</span>
+
+                          <div className="bible-reference-language-pills">
+                            {bibleTranslations.map(
+                              (translation) => (
+                                <button
+                                  key={translation.code}
+                                  type="button"
+                                  className={[
+                                    'bible-reference-language-pill',
+                                    referenceBibleTranslationCode ===
+                                    translation.code
+                                      ? 'active'
+                                      : '',
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' ')}
+                                  onClick={() =>
+                                    handleReferenceBibleTranslationChange(
+                                      translation.code
+                                    )
+                                  }
+                                >
+                                  {getBibleReferenceTranslationLabel(
+                                    translation
+                                  )}
+                                </button>
+                              )
+                            )}
+                          </div>
+                        </div>
+
+                        <label className="bible-form-field">
+                          <span>Book</span>
+                          <select
+                            value={bibleSelection.bookKey}
+                            onChange={handleBibleBookChange}
+                            disabled={bibleBooks.length === 0}
+                          >
+                            {bibleBooks.map((book) => (
+                              <option key={book.key} value={book.key}>
+                                {getBibleBookDisplayName(
+                                  book.key,
+                                  book.name
+                                )}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="bible-form-field">
+                          <span>Chapter</span>
+                          <select
+                            value={bibleSelection.chapter}
+                            onChange={handleBibleChapterChange}
+                            disabled={!selectedBibleBook}
+                          >
+                            {selectedBibleChapterOptions.map(
+                              (chapter) => (
+                                <option key={chapter} value={chapter}>
+                                  {chapter}
+                                </option>
+                              )
+                            )}
+                          </select>
+                        </label>
+
+                        <label className="bible-form-field">
+                          <span>Start Verse</span>
+                          <select
+                            value={bibleSelection.startVerse}
+                            onChange={handleBibleStartVerseChange}
+                            disabled={selectedBibleVerseCount === 0}
+                          >
+                            {selectedBibleVerseOptions.map((verse) => (
+                              <option key={verse} value={verse}>
+                                {verse}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="bible-form-field">
+                          <span>End Verse</span>
+                          <select
+                            value={bibleSelection.endVerse}
+                            onChange={handleBibleEndVerseChange}
+                            disabled={selectedBibleVerseCount === 0}
+                          >
+                            {selectedBibleContiguousEndVerseOptions.map(
+                              (verse) => (
+                                <option key={verse} value={verse}>
+                                  {verse}
+                                </option>
+                              )
+                            )}
+                          </select>
+                        </label>
+                      </div>
+
+                      <div id="live-controls" className="bible-selection-actions">
+                        <button
+                          className="button button-secondary"
+                          onClick={previewBiblePassageSelection}
+                          disabled={bibleBooks.length === 0}
+                        >
+                          Preview Passage
+                        </button>
+                      </div>
+
+                      {previewBiblePassage ? (
+                        <>
+                          <div className="bible-projection-mode-control">
+                            <p className="small-title">
+                              Projection Language
+                            </p>
+
+                            <div className="bible-projection-mode-pills">
+                              {BIBLE_PROJECTION_LANGUAGE_OPTIONS.map(
+                                (option) => (
+                                  <button
+                                    key={option.value}
+                                    type="button"
+                                    className={[
+                                      'bible-projection-mode-pill',
+                                      bibleProjectionMode === option.value
+                                        ? 'active'
+                                        : '',
+                                    ]
+                                      .filter(Boolean)
+                                      .join(' ')}
+                                    onClick={() =>
+                                      setBibleProjectionMode(
+                                        option.value
+                                      )
+                                    }
+                                  >
+                                    {option.label}
+                                  </button>
+                                )
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="bible-reading-header">
+                            <p className="small-title">
+                              {previewBiblePassage.reference}
+                            </p>
+                            <span>
+                              Select a verse to prepare it.
+                            </span>
+                          </div>
+
+                          <div className="bible-live-nav-buttons">
+                            <button
+                              className="button button-secondary"
+                              onClick={() =>
+                                navigateProjectedBibleVerse(-1)
+                              }
+                              disabled={
+                                !isBibleProjectionActive
+                              }
+                            >
+                              ← Previous
+                            </button>
+                            <button
+                              className="button button-secondary"
+                              onClick={() =>
+                                navigateProjectedBibleVerse(1)
+                              }
+                              disabled={
+                                !isBibleProjectionActive
+                              }
+                            >
+                              Next →
+                            </button>
+                            <button
+                              className="button button-primary"
+                              onClick={() =>
+                                projectBiblePassage({
+                                  singleVerse: true,
+                                })
+                              }
+                            >
+                              Send to Projector
+                            </button>
+                          </div>
+
+                          <AppScrollArea
+                            className="bible-console-reading-shell"
+                            viewportClassName="bible-console-reading"
+                            dependencyKey={`${previewBiblePassage.reference}-${bibleSelection.startVerse}-${bibleProjectionMode}`}
+                          >
+                            {previewBiblePassage.verses.map((verse) => (
+                              <button
+                                key={`${previewBiblePassage.reference}-${verse.verseNumber}`}
+                                ref={(element) => {
+                                  if (element) {
+                                    bibleConsoleVerseRefs.current.set(
+                                      verse.verseNumber,
+                                      element
+                                    )
+                                  } else {
+                                    bibleConsoleVerseRefs.current.delete(
+                                      verse.verseNumber
+                                    )
+                                  }
+                                }}
+                                type="button"
+                                className={[
+                                  'bible-console-verse',
+                                  bibleSelection.startVerse ===
+                                  verse.verseNumber
+                                    ? 'active'
+                                    : '',
+                                ]
+                                  .filter(Boolean)
+                                  .join(' ')}
+                                onClick={() =>
+                                  selectPreparedBibleVerse(
+                                    verse.verseNumber
+                                  )
+                                }
+                              >
+                                <strong>
+                                  {verse.verseNumber}
+                                  {isBibleProjectionActive &&
+                                    projectedBiblePassage?.reference ===
+                                      previewBiblePassage.reference &&
+                                    projectedBiblePassage.verses?.[
+                                      projectedBibleVerseIndex
+                                    ]?.verseNumber ===
+                                      verse.verseNumber && (
+                                      <span className="bible-live-indicator">
+                                        Live
+                                      </span>
+                                    )}
+                                </strong>
+                                {previewBiblePassage.projectionMode ===
+                                BIBLE_PROJECTION_MODES.FRENCH_ENGLISH ? (
+                                  <span className="bible-console-verse-stack">
+                                    <span>{verse.primaryText}</span>
+                                    <span>{verse.secondaryText}</span>
+                                  </span>
+                                ) : (
+                                  <span>{verse.text}</span>
+                                )}
+                              </button>
+                            ))}
+                          </AppScrollArea>
+
+                        </>
+                      ) : (
+                        <div className="empty-state">
+                          Preview a passage to review it before projection.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                {false && (
+                  <>
                 <div className="preview-title-row">
                   <div>
                     <p className="card-kicker">
-                      Projector Preview
+                      Live Projector Preview
                     </p>
 
                     <strong>
-                      {stagedProjectorContentType ===
-                      PROJECTION_CONTENT_TYPES.BIBLE
-                        ? currentBibleVerse
-                          ? `${projectedBiblePassage.reference} · Verse ${currentBibleVerse.verseNumber}`
-                          : projectedBiblePassage?.reference ||
-                            'Bible Passage'
-                        : projectorPreviewSection?.name ||
-                          'Ready'}
+                      {liveProjectorState.projectionMode ===
+                      'BLACK'
+                        ? 'Black Screen'
+                        : liveProjectorState.projectionMode !==
+                            'LIVE'
+                          ? 'Ready'
+                          : liveProjectorState.projectionContentType ===
+                              PROJECTION_CONTENT_TYPES.BIBLE
+                            ? liveProjectorBibleVerse
+                              ? `${liveProjectorState.projectedBiblePassage.reference} · Verse ${liveProjectorBibleVerse.verseNumber}`
+                              : liveProjectorState.projectedBiblePassage?.reference ||
+                                'Bible Passage'
+                            : liveProjectorPreviewSection?.name ||
+                              'Ready'}
                     </strong>
                   </div>
 
                   <div className="preview-header-actions">
-                    {stagedProjectorContentType ===
-                    PROJECTION_CONTENT_TYPES.BIBLE ? (
-                      <div className="current-actions">
-                        <button
-                          className="button button-secondary"
-                          onClick={
-                            returnToSongProjection
-                          }
-                        >
-                          Return to Song
-                        </button>
-                      </div>
-                    ) : (
-                      currentSong && (
-                      <div className="current-actions">
-                        <button
-                          className="button button-secondary"
-                          onClick={
-                            () =>
-                              openEditSongModal(
-                                currentSong
-                              )
-                          }
-                        >
-                          Edit
-                        </button>
-
-                        <button
-                          className="button button-primary"
-                          onClick={() =>
-                            projectSong(
-                              currentSong
-                            )
-                          }
-                        >
-                          Send to Projector
-                        </button>
-                      </div>
-                      )
-                    )}
-
                     <div className="live-indicator">
                       <span className="green-dot" />
 
-                      {projectionMode}
+                      {liveProjectorState.projectionMode}
                     </div>
                   </div>
                 </div>
 
                 <ProjectorDisplay
-                  song={stagedProjectorSong}
+                  song={
+                    liveProjectorState.projectionSong
+                  }
                   sectionIndex={
-                    stagedProjectorSectionIndex
+                    liveProjectorState.sectionIndex
                   }
                   projectionContentType={
-                    stagedProjectorContentType
+                    liveProjectorState.projectionContentType
                   }
                   biblePassage={
-                    projectedBiblePassage
+                    liveProjectorState.projectedBiblePassage
                   }
                   bibleVerseIndex={
-                    projectedBibleVerseIndex
+                    liveProjectorState.projectedBibleVerseIndex
                   }
+                  event={liveProjectorState.projectedEvent}
+                  events={liveProjectorState.projectedEvents}
+                  eventPageIndex={liveProjectorState.projectedEventPageIndex}
                   projectionMode={
-                    stagedProjectorPreviewMode
+                    liveProjectorState.projectionMode
                   }
-                  backgroundType={backgroundType}
+                  backgroundType={
+                    liveProjectorState.backgroundType
+                  }
                   backgroundVariant={
-                    backgroundVariant
+                    liveProjectorState.backgroundVariant
                   }
                   customBackgroundUrl={
-                    customBackgroundUrl
+                    networkBackgroundData || customBackgroundUrl
                   }
                   projectionSettings={
-                    projectionSettings
+                    liveProjectorState.projectionSettings
                   }
                 />
 
@@ -10864,13 +12186,17 @@ function App() {
                   <button
                     className="button button-secondary"
                     onClick={
-                      previousSection
+                      projectionContentType === PROJECTION_CONTENT_TYPES.EVENT
+                        ? () => moveProjectedEventPage(-1)
+                        : previousSection
                     }
                     disabled={
-                      !canGoToPreviousProjection
+                      projectionContentType === PROJECTION_CONTENT_TYPES.EVENT
+                        ? projectedEventPageIndex <= 0
+                        : !canGoToPreviousProjection
                     }
                   >
-                    {previewProjectionContentType ===
+                    {projectionContentType !== PROJECTION_CONTENT_TYPES.EVENT && previewProjectionContentType ===
                     PROJECTION_CONTENT_TYPES.BIBLE
                       ? '← Previous Verse'
                       : '← Previous'}
@@ -10917,12 +12243,14 @@ function App() {
 
                   <button
                     className="button button-primary"
-                    onClick={nextSection}
+                    onClick={projectionContentType === PROJECTION_CONTENT_TYPES.EVENT ? () => moveProjectedEventPage(1) : nextSection}
                     disabled={
-                      !canGoToNextProjection
+                      projectionContentType === PROJECTION_CONTENT_TYPES.EVENT
+                        ? projectedEventPageIndex >= eventPageCount(projectedEvents) - 1
+                        : !canGoToNextProjection
                     }
                   >
-                    {previewProjectionContentType ===
+                    {projectionContentType !== PROJECTION_CONTENT_TYPES.EVENT && previewProjectionContentType ===
                     PROJECTION_CONTENT_TYPES.BIBLE
                       ? 'Next Verse →'
                       : 'Next →'}
@@ -10932,445 +12260,14 @@ function App() {
                 <p className="projection-shortcuts-hint">
                   Shortcuts: `←` previous, `→` or `Space` next, `B` black, `C` clear lyrics.
                 </p>
+                  </>
+                )}
                 </AppScrollArea>
               </section>
             </div>
           </div>
         )}
 
-        {activeView === 'bible' && (
-          <div className="admin-view bible-view">
-            <header className="service-header">
-              <div>
-                <p className="page-kicker">
-                  Bible Projection
-                </p>
-
-                <h2>Bible</h2>
-
-                <p className="header-description">
-                  Select a passage, preview it,
-                  and send it to the projector
-                  without interrupting the
-                  current service plan.
-                </p>
-              </div>
-
-              <div className="header-right">
-                <button
-                  className="button button-secondary"
-                  onClick={() =>
-                    setActiveView('operator')
-                  }
-                >
-                  Worship Console
-                </button>
-              </div>
-            </header>
-
-            <div className="bible-grid">
-              <section className="console-card bible-selection-card">
-                <div className="card-header">
-                  <div>
-                    <p className="card-kicker">
-                      Passage Selection
-                    </p>
-
-                    <h3>Select Reference</h3>
-                  </div>
-                </div>
-
-                <div className="bible-form-grid">
-                  <div className="bible-form-field bible-reference-language-field">
-                    <span>Bible Language</span>
-
-                    <div className="bible-reference-language-pills">
-                      {bibleTranslations.map(
-                        (translation) => (
-                          <button
-                            key={translation.code}
-                            type="button"
-                            className={[
-                              'bible-reference-language-pill',
-                              referenceBibleTranslationCode ===
-                              translation.code
-                                ? 'active'
-                                : '',
-                            ]
-                              .filter(Boolean)
-                              .join(' ')}
-                            onClick={() =>
-                              handleReferenceBibleTranslationChange(
-                                translation.code
-                              )
-                            }
-                          >
-                            {getBibleReferenceTranslationLabel(
-                              translation
-                            )}
-                          </button>
-                        )
-                      )}
-                    </div>
-                  </div>
-
-                  <label className="bible-form-field">
-                    <span>Book</span>
-                    <select
-                      value={
-                        bibleSelection.bookKey
-                      }
-                      onChange={
-                        handleBibleBookChange
-                      }
-                      disabled={
-                        bibleBooks.length === 0
-                      }
-                    >
-                      {bibleBooks.map((book) => (
-                        <option
-                          key={book.key}
-                          value={book.key}
-                        >
-                          {getBibleBookDisplayName(
-                            book.key,
-                            book.name
-                          )}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="bible-form-field">
-                    <span>Chapter</span>
-                    <select
-                      value={
-                        bibleSelection.chapter
-                      }
-                      onChange={
-                        handleBibleChapterChange
-                      }
-                      disabled={
-                        !selectedBibleBook
-                      }
-                    >
-                      {selectedBibleChapterOptions.map(
-                        (chapter) => (
-                          <option
-                            key={chapter}
-                            value={chapter}
-                          >
-                            {chapter}
-                          </option>
-                        )
-                      )}
-                    </select>
-                  </label>
-
-                  <label className="bible-form-field">
-                    <span>Start Verse</span>
-                    <select
-                      value={
-                        bibleSelection.startVerse
-                      }
-                      onChange={
-                        handleBibleStartVerseChange
-                      }
-                      disabled={
-                        selectedBibleVerseCount ===
-                        0
-                      }
-                    >
-                      {selectedBibleVerseOptions.map(
-                        (verse) => (
-                          <option
-                            key={verse}
-                            value={verse}
-                          >
-                            {verse}
-                          </option>
-                        )
-                      )}
-                    </select>
-                  </label>
-
-                  <label className="bible-form-field">
-                    <span>End Verse</span>
-                    <select
-                      value={
-                        bibleSelection.endVerse
-                      }
-                      onChange={
-                        handleBibleEndVerseChange
-                      }
-                      disabled={
-                        selectedBibleVerseCount ===
-                        0
-                      }
-                    >
-                      {selectedBibleContiguousEndVerseOptions.map(
-                        (verse) => (
-                          <option
-                            key={verse}
-                            value={verse}
-                          >
-                            {verse}
-                          </option>
-                        )
-                      )}
-                    </select>
-                  </label>
-                </div>
-
-                <div className="bible-selection-actions">
-                  <button
-                    className="button button-primary"
-                    onClick={
-                      previewBiblePassageSelection
-                    }
-                    disabled={
-                      bibleBooks.length === 0
-                    }
-                  >
-                    Preview Passage
-                  </button>
-                </div>
-              </section>
-
-              <section className="console-card bible-preview-card">
-                {previewBiblePassage ? (
-                  <>
-                    <div className="bible-preview-sticky-header">
-                      <div className="card-header bible-preview-card-header">
-                        <div>
-                          <p className="card-kicker">
-                            Passage Preview
-                          </p>
-
-                          <h3>
-                            {previewBiblePassage.reference}
-                          </h3>
-                        </div>
-
-                        <div className="bible-preview-code-list">
-                          {(
-                            previewBiblePassage
-                              .projectionMode ===
-                            BIBLE_PROJECTION_MODES.FRENCH_ENGLISH
-                              ? [
-                                  BIBLE_TRANSLATION_CODES.FRENCH,
-                                  BIBLE_TRANSLATION_CODES.ENGLISH,
-                                ]
-                              : [
-                                  previewBiblePassage.translationCode,
-                                ]
-                          ).map((code) => (
-                            <span
-                              key={code}
-                              className="number-pill"
-                            >
-                              {code}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="bible-preview-reference">
-                        {previewBiblePassage.translationName}
-                      </div>
-
-                      <div className="bible-preview-selection-language">
-                        Reference language:{' '}
-                        <strong>
-                          {selectedReferenceBibleTranslation
-                            ? `${selectedReferenceBibleTranslation.name} (${selectedReferenceBibleTranslation.code})`
-                            : referenceBibleTranslationCode}
-                        </strong>
-                      </div>
-                    </div>
-
-                    <AppScrollArea
-                      className="bible-preview-verses-shell"
-                      viewportClassName="bible-preview-verses"
-                      dependencyKey={`${previewBiblePassage.reference}-${previewBiblePassage.verses.length}-${previewBiblePassage.translationCode}`}
-                    >
-                      {previewBiblePassage.verses.map(
-                        (verse) => (
-                          <p
-                            key={`${previewBiblePassage.reference}-${verse.verseNumber}`}
-                            className="bible-preview-verse"
-                          >
-                            <strong>
-                              {
-                                verse.verseNumber
-                              }
-                            </strong>
-
-                            {previewBiblePassage.projectionMode ===
-                            BIBLE_PROJECTION_MODES.FRENCH_ENGLISH ? (
-                              <span className="bible-preview-verse-stack">
-                                <span className="bible-preview-verse-text">
-                                  {
-                                    verse.primaryText
-                                  }
-                                </span>
-                                <span className="bible-preview-verse-text secondary">
-                                  {
-                                    verse.secondaryText
-                                  }
-                                </span>
-                              </span>
-                            ) : (
-                              <span className="bible-preview-verse-text">
-                                {verse.text}
-                              </span>
-                            )}
-                          </p>
-                        )
-                      )}
-                    </AppScrollArea>
-
-                    <div className="bible-preview-action-bar">
-                      <div className="bible-live-control-header">
-                        <div>
-                          <p className="card-kicker">
-                            Live Bible Controls
-                          </p>
-
-                          <strong className="bible-live-current-reference">
-                            {liveBibleReference ||
-                              previewBiblePassage.reference}
-                          </strong>
-                        </div>
-
-                        <div className="bible-live-nav-buttons">
-                          <button
-                            className="button button-secondary"
-                            onClick={
-                              previousSection
-                            }
-                            disabled={
-                              !isBibleProjectionActive ||
-                              !canGoToPreviousProjection
-                            }
-                          >
-                            ← Previous Verse
-                          </button>
-
-                          <button
-                            className="button button-secondary"
-                            onClick={nextSection}
-                            disabled={
-                              !isBibleProjectionActive ||
-                              !canGoToNextProjection
-                            }
-                          >
-                            Next Verse →
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="bible-preview-action-layout">
-                        <div className="bible-projection-mode-control">
-                          <p className="small-title">
-                            Projection Language
-                          </p>
-
-                          <div className="bible-projection-mode-pills">
-                            {BIBLE_PROJECTION_LANGUAGE_OPTIONS.map(
-                              (option) => (
-                                <button
-                                  key={option.value}
-                                  type="button"
-                                  className={[
-                                    'bible-projection-mode-pill',
-                                    bibleProjectionMode ===
-                                    option.value
-                                      ? 'active'
-                                      : '',
-                                  ]
-                                    .filter(Boolean)
-                                    .join(' ')}
-                                  onClick={() =>
-                                    handleBibleProjectionModeChange(
-                                      option.value
-                                    )
-                                  }
-                                >
-                                  {option.label}
-                                </button>
-                              )
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="bible-selection-actions bible-preview-actions">
-                          <button
-                            className="button button-primary"
-                            onClick={
-                              projectBiblePassage
-                            }
-                          >
-                            {isBibleProjectionActive
-                              ? 'Update Projector'
-                              : 'Send to Projector'}
-                          </button>
-
-                          {isBibleProjectionActive && (
-                            <>
-                              <button
-                                className="button button-secondary"
-                                onClick={
-                                  returnToSongProjection
-                                }
-                              >
-                                Return to Song
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </div>
-
-                      {isBibleProjectionActive &&
-                        currentBibleVerse && (
-                          <p className="inline-note bible-live-note">
-                            Projecting{' '}
-                            <strong>
-                              {liveBibleReference}
-                            </strong>{' '}
-                            using{' '}
-                            <strong>
-                              {
-                                projectedBiblePassage.translationName
-                              }
-                            </strong>
-                            .
-                          </p>
-                        )}
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="card-header bible-preview-card-header">
-                      <div>
-                        <p className="card-kicker">
-                          Passage Preview
-                        </p>
-
-                        <h3>Choose a passage</h3>
-                      </div>
-                    </div>
-
-                    <div className="empty-state bible-preview-empty">
-                      Preview a Bible passage to
-                      review it before projection.
-                    </div>
-                  </>
-                )}
-              </section>
-            </div>
-          </div>
-        )}
 
         {activeView === 'songs' && (
           <div className="admin-view">
@@ -11979,6 +12876,77 @@ function App() {
                 </AppScrollArea>
               </section>
             </div>
+          </div>
+        )}
+
+        {activeView === 'events' && (
+          <div className="admin-view">
+            <header className="service-header">
+              <div>
+                <p className="page-kicker">Upcoming Events</p>
+                <h2>Upcoming Events</h2>
+                <p className="header-description">Plan and manage upcoming church events.</p>
+              </div>
+              <div className="header-right">
+                <label>
+                  Presentation
+                  <select value={eventPresentation} onChange={(event) => { setEventPresentation(event.target.value); setActiveKeyboardPanel('EVENTS_LIST') }}>
+                    <option value="upcoming">Upcoming Events ({upcomingEvents.length})</option>
+                    {birthdayLists.map((event) => (
+                      <option key={event.id} value={String(event.id)}>
+                        Birthday List — {MONTH_NAMES[event.birthdayMonth - 1]}{event.displayYear ? ` ${event.displayYear}` : ''} ({event.birthdayEntries.length} birthdays)
+                      </option>
+                    ))}
+                    {eventPresentation !== 'upcoming' && !selectedEventPresentation.length && (
+                      <option value={eventPresentation} disabled>Birthday List unavailable</option>
+                    )}
+                  </select>
+                </label>
+                <button className="button button-secondary" onClick={openNewEventModal}>+ Add Event</button>
+                <button className="button button-primary" disabled={isSendingEvents || (selectedEventIds !== null && eventPresentation === 'upcoming' && !selectedEventPageCount) || (eventPresentation !== 'upcoming' && !selectedEventPageCount)} onClick={projectEvent}>{isSendingEvents ? 'Sending…' : 'Send to Projector'}</button>
+              </div>
+            </header>
+
+            <div className="event-selection-toolbar">
+              <span>{selectedEvents(upcomingEvents, selectedEventIds).length} upcoming events selected</span>
+              <button className="button button-secondary" onClick={() => changeEventSelection(null)}>Select All Events</button>
+              <button className="button button-secondary" onClick={() => changeEventSelection([])}>Clear Event Selection</button>
+              <small>Selection is preparation only. Send to Projector to replace live events. Birthday lists use the existing presentation selector.</small>
+            </div>
+            <section className="events-list">
+              {managementEvents.map((event) => (
+                <article className={`console-card event-card${highlightedEventId === event.id ? ' keyboard-event-highlight' : ''}`} data-keyboard-event={event.id} key={event.id} onClick={(click) => { if (!click.target.closest('button, input, select, textarea, [contenteditable]')) setHighlightedEventId(event.id) }}>
+                  <div>
+
+                    {isBirthdayList(event) ? <>
+                      <p className="card-kicker">Birthday List</p>
+                      <h3>Birthdays for the Month of {MONTH_NAMES[event.birthdayMonth - 1]}</h3>
+                      <p>{event.birthdayEntries.length} birthdays{event.displayYear ? ` · Display year: ${event.displayYear}` : ''}</p>
+                      <ul className="birthday-summary">{sortBirthdays(event.birthdayEntries).map((person, index) => <li key={index}>{person.name} — {birthdayDateLabel(person)}</li>)}</ul>
+                    </> : <>
+                    <p className="card-kicker">{event.eventType || 'Event'}</p>
+                    <p style={{ color: event.dateColor || '#8B3A8B', fontWeight: event.dateBold ?? true ? 800 : undefined, fontStyle: event.dateItalic ? 'italic' : undefined, textDecoration: event.dateUnderline ?? true ? 'underline' : undefined }}>{formatEventDateRange(event.eventDate, event.endDate)}</p>
+                    <h3 style={{ color: event.titleColor || '#000000', fontWeight: event.titleBold ? 800 : undefined, fontStyle: event.titleItalic ? 'italic' : undefined, textDecoration: event.titleUnderline ? 'underline' : undefined }}>{event.title}</h3>
+                    {event.hostName?.trim() && <p style={{ color: event.detailsColor || '#000000' }}>Host: {event.hostName.trim()}</p>}
+                    <p>{formatServiceTime(event.startTime)}{event.endTime ? ` - ${formatServiceTime(event.endTime)}` : ''}</p>
+                    {event.location && <p style={{ color: event.detailsColor || '#000000' }}>{event.location}</p>}
+                    {event.description && <p className="event-description" style={{ color: event.detailsColor || '#000000' }}>{event.description}</p>}
+                    </>}
+                    {!isBirthdayList(event) && <label className="event-selection-control"><input type="checkbox" aria-label={`Include ${event.title} in projection`} checked={selectedEventIds === null || selectedEventIds.includes(event.id)} onChange={change => {
+                      const ids = selectedEventIds === null ? upcomingEvents.map(item => item.id) : selectedEventIds
+                      changeEventSelection(change.target.checked ? [...ids, event.id] : ids.filter(id => id !== event.id))
+                    }} /><span>Include in projection</span></label>}
+                  </div>
+                  <div className="event-actions">
+                    <button className="button button-secondary" onClick={() => openEditEventModal(event)}>Edit</button>
+                    <button className="button button-danger" onClick={() => deleteEvent(event)}>Delete</button>
+                  </div>
+                </article>
+              ))}
+              {events.every((event) => !isBirthdayList(event) && !isUpcomingEvent(event, getLocalIsoDate())) && (
+                <div className="empty-state">No upcoming events.<br /><button className="button button-primary" onClick={openNewEventModal}>+ Add Event</button></div>
+              )}
+            </section>
           </div>
         )}
 
@@ -12925,6 +13893,8 @@ function App() {
               </div>
             </header>
 
+            <NetworkAccessPanel />
+
             <div className="settings-grid">
               <section className="console-card">
                 <div className="card-header">
@@ -12981,7 +13951,7 @@ function App() {
                       Projection Defaults
                     </p>
 
-                    <h3>Future Sessions</h3>
+                    <h3>Projection Preferences</h3>
                   </div>
                 </div>
 
@@ -13068,12 +14038,8 @@ function App() {
                   </label>
 
                   <p className="settings-note">
-                    These values are used as
-                    safe starting defaults for
-                    future sessions. Operators
-                    can still change language,
-                    background, and service type
-                    during live use.
+                    The background applies to the projector and remains saved after refresh.
+                    Language and service type provide defaults for future sessions.
                   </p>
 
                   <div className="settings-actions">
@@ -13082,6 +14048,7 @@ function App() {
                       onClick={
                         saveApplicationSettings
                       }
+                      disabled={!settingsLoaded}
                       type="button"
                     >
                       Save Settings
@@ -13107,7 +14074,7 @@ function App() {
                 </h2>
 
                 <p className="header-description">
-                  Protect your Church Song
+                  Protect your BOC WorshipView
                   data by creating a full
                   database backup.
                 </p>
@@ -13181,6 +14148,62 @@ function App() {
           </>
         )}
       </main>
+
+      {showEventModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <div className="modal-heading">
+              <div><p className="card-kicker">Upcoming Events</p><h2>{editingEventId == null ? 'Add Event' : 'Edit Event'}</h2></div>
+              <button className="modal-close" onClick={() => setShowEventModal(false)}>×</button>
+            </div>
+            {error && <p role="alert" className="event-editor-error">{error}</p>}
+            <label>Event Type<select value={isBirthdayList(eventForm) ? BIRTHDAY_LIST : 'REGULAR'} onChange={(event) => setEventForm({ ...eventForm, eventType: event.target.value === BIRTHDAY_LIST ? BIRTHDAY_LIST : '' })}>
+              <option value="REGULAR">Regular Event</option><option value={BIRTHDAY_LIST}>Birthday List</option>
+            </select></label>
+            {isBirthdayList(eventForm) ? <BirthdayEditor value={eventForm} onChange={setEventForm} /> : <>
+            <label>Title *<input value={eventForm.title} onChange={(event) => setEventForm({ ...eventForm, title: event.target.value })} /></label>
+            <label>Start Date *<input type="date" required value={eventForm.eventDate} onChange={(event) => setEventForm({ ...eventForm, eventDate: event.target.value })} /></label>
+            <label>End Date<input type="date" min={eventForm.eventDate || undefined} value={eventForm.endDate} onChange={(event) => setEventForm({ ...eventForm, endDate: event.target.value })} /></label>
+            <label>Start Time *<input type="time" value={eventForm.startTime} onChange={(event) => setEventForm({ ...eventForm, startTime: event.target.value })} /></label>
+            <label>End Time<input type="time" value={eventForm.endTime} onChange={(event) => setEventForm({ ...eventForm, endTime: event.target.value })} /></label>
+            <label>Host Name (optional)<input type="text" value={eventForm.hostName} onChange={(event) => setEventForm({ ...eventForm, hostName: event.target.value })} /></label>
+            <label>Location<input value={eventForm.location} onChange={(event) => setEventForm({ ...eventForm, location: event.target.value })} /></label>
+            <label>Category<select value={eventForm.eventType} onChange={(event) => setEventForm({ ...eventForm, eventType: event.target.value })}><option value="">Select type</option>{EVENT_TYPE_OPTIONS.map((type) => <option key={type} value={type}>{type.replace('_', ' ')}</option>)}</select></label>
+            <label>Description<textarea rows="4" value={eventForm.description} onChange={(event) => setEventForm({ ...eventForm, description: event.target.value })} /></label>
+            {[
+              ['Title Color', 'titleColor'],
+              ['Date Color', 'dateColor'],
+              ['Details Color', 'detailsColor'],
+            ].map(([label, field]) => (
+              <div className="event-color-field" key={field}>
+                <span>{label}</span>
+                <input type="color" value={eventForm[field]} onChange={(event) => setEventForm({ ...eventForm, [field]: event.target.value })} />
+                <div className="event-color-palette">
+                  {EVENT_COLOR_PALETTE.map(([name, color]) => (
+                    <button key={color} type="button" title={name} aria-label={name} className={eventForm[field] === color ? 'active' : ''} style={{ backgroundColor: color }} onClick={() => setEventForm({ ...eventForm, [field]: color })} />
+                  ))}
+                </div>
+              </div>
+            ))}
+            {[
+              ['Title Formatting', 'titleBold', 'titleItalic', 'titleUnderline'],
+              ['Date Formatting', 'dateBold', 'dateItalic', 'dateUnderline'],
+              ['Details Formatting', 'detailsBold', 'detailsItalic', 'detailsUnderline'],
+            ].map(([label, bold, italic, underline]) => (
+              <div className="event-format-field" key={label}>
+                <span>{label}</span>
+                <div className="event-format-buttons">
+                  {[[bold, 'B', 'Bold'], [italic, 'I', 'Italic'], [underline, 'U', 'Underline']].map(([field, text, name]) => (
+                    <button key={field} type="button" aria-label={name} title={name} className={eventForm[field] ? 'active' : ''} onClick={() => setEventForm({ ...eventForm, [field]: !eventForm[field] })}>{text}</button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            </>}
+            <div className="modal-buttons"><button className="button button-secondary" onClick={() => setShowEventModal(false)}>Cancel</button><button className="button button-primary" onClick={saveEvent}>{editingEventId == null ? 'Add Event' : 'Save Event'}</button></div>
+          </div>
+        </div>
+      )}
 
       {showNewSongModal && (
         <div className="modal-overlay">

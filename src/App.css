@@ -256,6 +256,329 @@ button:disabled {
   overflow: visible;
 }
 
+.events-page-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 14px 18px;
+  border: 1px solid #93c5fd;
+  border-radius: 12px;
+  background: #eff6ff;
+  color: #1e3a8a;
+}
+
+.events-page-status > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.events-page-status-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.events-page-status-hint {
+  font-size: 14px;
+}
+
+.events-list {
+  display: grid;
+  gap: 14px;
+}
+
+.event-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.event-card h3,
+.event-card p {
+  margin: 0;
+}
+
+.event-card p + p {
+  margin-top: 6px;
+  color: var(--text-muted);
+}
+
+.event-description {
+  max-width: 70ch;
+}
+
+.event-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.event-color-field {
+  display: grid;
+  gap: 8px;
+}
+
+.event-color-field > span {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.event-color-field > input {
+  width: 48px;
+  height: 34px;
+  padding: 2px;
+}
+
+.event-color-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.event-color-palette button {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #d4dce8;
+  border-radius: 50%;
+}
+
+.event-color-palette button.active {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.event-format-field {
+  display: grid;
+  gap: 8px;
+}
+
+.event-format-field > span {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.event-format-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.event-format-buttons button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.event-format-buttons button:nth-child(2) {
+  font-style: italic;
+}
+
+.event-format-buttons button:nth-child(3) {
+  text-decoration: underline;
+}
+
+.event-format-buttons button.active {
+  border-color: var(--blue);
+  background: #edf4ff;
+  color: var(--blue);
+}
+
+/* Events alone own their margins and scale to the projector, including previews. */
+.projector-screen.projector-screen-event {
+  container-type: size;
+  padding: 0;
+}
+
+.projector-window-shell .projector-screen.projector-screen-event {
+  padding: 0;
+  height: 100vh;
+}
+
+.projector-screen-event {
+  --event-text-color: #ffffff;
+  --event-detail-color: #f1f5f9;
+  --event-text-edge: #111827;
+}
+
+.projector-screen-event[data-event-text-theme="dark"] {
+  --event-text-color: #111827;
+  --event-detail-color: #111827;
+  --event-text-edge: #ffffff;
+}
+
+/* Keep glyphs distinct across bright and dark areas of scenic images. */
+.projector-screen-event .screen-content-event {
+  color: var(--event-text-color);
+  text-shadow: -1px -1px 0 var(--event-text-edge),
+    1px -1px 0 var(--event-text-edge),
+    -1px 1px 0 var(--event-text-edge),
+    1px 1px 0 var(--event-text-edge);
+}
+
+.screen-content.screen-content-event {
+  --event-scale: 1;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  text-align: left;
+  padding: 5cqh 9cqw;
+  overflow: hidden;
+}
+
+.event-projection-heading {
+  flex-shrink: 0;
+  width: 100%;
+  margin: 0 0 calc(2.2cqh * var(--event-scale));
+  padding-bottom: calc(0.6cqh * var(--event-scale));
+  border-bottom: 3px solid currentColor;
+  font-size: calc(clamp(min(32px, 4cqw), 4cqw, 58px) * var(--event-scale));
+  line-height: 1.05;
+  font-weight: 800;
+  text-transform: uppercase;
+  text-align: left;
+}
+
+.event-projection-item {
+  flex-shrink: 0;
+  width: 100%;
+  display: grid;
+  gap: calc(0.25cqh * var(--event-scale));
+  margin-bottom: calc(1.6cqh * var(--event-scale));
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.event-projection-item:last-child {
+  margin-bottom: 0;
+}
+
+.event-projection-date {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 calc(0.3cqh * var(--event-scale));
+  padding-bottom: calc(0.2cqh * var(--event-scale));
+  border-bottom: 2px solid currentColor;
+  font-size: calc(clamp(min(21px, 2.4cqw), 2.4cqw, 36px) * var(--event-scale));
+  line-height: 1.05;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.event-projection-title {
+  margin: calc(0.15cqh * var(--event-scale)) 0;
+  font-size: calc(clamp(min(26px, 3cqw), 3cqw, 44px) * var(--event-scale));
+  line-height: 1.08;
+  font-weight: 800;
+  color: #ffffff;
+  text-decoration: none;
+  text-align: left;
+}
+
+.event-projection-detail {
+  margin: 0;
+  font-size: calc(clamp(min(18px, 2cqw), 2cqw, 30px) * var(--event-scale));
+  line-height: 1.12;
+  font-weight: 500;
+  color: #ffffff;
+  text-align: left;
+}
+
+.birthday-projection {
+  color: var(--event-text-color);
+}
+
+.birthday-projection-heading {
+  font-size: calc(clamp(min(30px, 3.6cqw), 3.6cqw, 58px) * var(--event-scale));
+  overflow-wrap: anywhere;
+}
+
+.birthday-table {
+  width: 100%;
+  display: grid;
+  flex-shrink: 0;
+}
+
+.birthday-table-header,
+.birthday-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 32%);
+  align-items: center;
+  column-gap: 4cqw;
+}
+
+.birthday-table-header {
+  padding-bottom: calc(0.8cqh * var(--event-scale));
+  margin-bottom: calc(0.8cqh * var(--event-scale));
+  border-bottom: 2px solid currentColor;
+  font-size: calc(clamp(min(18px, 2cqw), 2cqw, 28px) * var(--event-scale));
+  line-height: 1.1;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.birthday-row {
+  min-height: calc(6.5cqh * var(--event-scale));
+  padding-block: calc(0.6cqh * var(--event-scale));
+  font-size: calc(clamp(min(21px, 2.5cqw), 2.5cqw, 36px) * var(--event-scale));
+  line-height: 1.1;
+  font-weight: 600;
+}
+
+.birthday-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.birthday-date {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.birthday-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.birthday-editor-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.birthday-editor-row input {
+  min-width: 0;
+}
+
+.birthday-summary {
+  margin-block: 12px;
+  padding-left: 20px;
+}
+
+.event-editor-error {
+  color: #b42318;
+}
+
+@media (max-width: 600px) {
+  .birthday-editor-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
 /* HEADER */
 
 .service-header {
@@ -450,43 +773,6 @@ button:disabled {
   font-weight: 800;
 }
 
-/* BIBLE */
-
-.bible-grid {
-  display: grid;
-  grid-template-columns:
-    minmax(280px, 0.9fr)
-    minmax(360px, 1.1fr);
-  gap: 18px;
-  align-items: stretch;
-  flex: 1;
-  height: 100%;
-  max-height: 100%;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.bible-selection-card,
-.bible-preview-card {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  max-height: 100%;
-  min-height: 0;
-}
-
-.bible-grid > * {
-  min-height: 0;
-}
-
-.bible-selection-card {
-  overflow: auto;
-}
-
-.bible-preview-card {
-  overflow: hidden;
-}
-
 .bible-form-grid {
   display: grid;
   grid-template-columns:
@@ -551,126 +837,11 @@ button:disabled {
   margin-top: 18px;
 }
 
-.bible-preview-reference {
-  color: var(--text-muted);
-  font-size: 14px;
-  font-weight: 600;
-  margin-bottom: 0;
-}
-
-.bible-preview-selection-language {
-  margin-top: 8px;
-  color: #6e7b8f;
-  font-size: 12px;
-}
-
-.bible-preview-sticky-header {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  margin: -18px -18px 0;
-  padding: 18px 18px 14px;
-  border-bottom: 1px solid #e3eaf3;
-  background: #ffffff;
-}
-
-.bible-preview-card-header {
-  margin-bottom: 10px;
-}
-
-.bible-preview-code-list {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.bible-preview-verses {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  margin: 0 -18px;
-  padding: 18px;
-  background: #f8fbff;
-}
-
-.bible-preview-verse {
-  margin: 0;
-  color: #30405c;
-  line-height: 1.65;
-}
-
-.bible-preview-verse strong {
-  display: block;
-  margin-bottom: 6px;
-}
-
-.bible-preview-verse-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.bible-preview-verse-text {
-  display: block;
-}
-
-.bible-preview-verse-text.secondary {
-  padding-top: 10px;
-  border-top: 1px solid #dce5f1;
-  color: #50617a;
-}
-
-.bible-preview-verse + .bible-preview-verse {
-  margin-top: 14px;
-}
-
-.bible-preview-action-bar {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
-  margin: 0 -18px -18px;
-  padding: 14px 18px 18px;
-  border-top: 1px solid #e3eaf3;
-  background: #ffffff;
-}
-
-.bible-live-control-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 14px;
-}
-
-.bible-live-current-reference {
-  display: block;
-  margin-top: 8px;
-  color: #22314a;
-  font-size: 18px;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-}
-
 .bible-live-nav-buttons {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.bible-preview-actions {
-  margin-top: 0;
-}
-
-.bible-preview-action-layout {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
 }
 
 .bible-projection-mode-control {
@@ -698,21 +869,6 @@ button:disabled {
   background: #eef4ff;
   color: var(--blue);
   border-color: var(--blue);
-}
-
-.bible-live-note {
-  margin: 12px 0 0;
-}
-
-.bible-preview-empty {
-  flex: 1;
-  min-height: 0;
-}
-
-.bible-view {
-  height: 100%;
-  max-height: 100%;
-  min-height: 0;
 }
 
 .screen-reference {
@@ -816,18 +972,6 @@ button:disabled {
   text-align: left;
 }
 
-.song-item:hover {
-  background: #fafcff;
-  border-color: #b7cae8;
-}
-
-.song-item.selected {
-  background: #f2f7ff;
-  border-color: var(--blue);
-  box-shadow:
-    inset 0 0 0 1px
-    rgba(45, 105, 215, 0.18);
-}
 
 .song-copy {
   min-width: 0;
@@ -945,16 +1089,6 @@ button:disabled {
     box-shadow 0.15s ease;
 }
 
-.service-song:hover,
-.service-song.selected {
-  background: #f7faff;
-  border-color: #b5cae8;
-}
-
-.service-song:focus {
-  outline: 2px solid
-    rgba(35, 104, 216, 0.2);
-}
 
 .service-song.drag-over {
   background: #edf5ff;
@@ -1200,6 +1334,114 @@ button:disabled {
   padding-top: 14px;
   padding-bottom: 26px;
   box-sizing: border-box;
+}
+
+.prepared-song-preview {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px solid #e6eaf0;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.prepared-song-preview .small-title {
+  margin: 0;
+}
+
+.prepare-workspace-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.prepare-workspace-tab {
+  min-height: 36px;
+  padding: 7px 14px;
+  border: 1px solid #d7deea;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #687488;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.prepare-workspace-tab.active {
+  border-color: #9fc2f5;
+  background: #edf4ff;
+  color: #2368d8;
+}
+
+.bible-prepare-workspace {
+  display: grid;
+  gap: 16px;
+}
+
+.bible-reading-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bible-reading-header .small-title,
+.bible-reading-header span {
+  margin: 0;
+}
+
+.bible-reading-header span {
+  color: #687488;
+  font-size: 13px;
+}
+
+.bible-console-reading-shell {
+  height: min(46vh, 520px);
+  min-height: 260px;
+}
+
+.bible-console-reading {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.bible-console-verse {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+  padding: 13px;
+  border: 1px solid #e1e7f0;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #26364d;
+  text-align: left;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.bible-console-verse.active {
+  border-color: #2368d8;
+  background: #edf4ff;
+  box-shadow: inset 3px 0 0 #2368d8;
+}
+
+.bible-live-indicator {
+  display: block;
+  margin-top: 4px;
+  color: #687488;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.bible-console-verse-stack {
+  display: grid;
+  gap: 6px;
+}
+
+.bible-console-verse-stack span:last-child {
+  color: #687488;
 }
 
 .current-heading {
@@ -3039,17 +3281,6 @@ button:disabled {
 /* RESPONSIVE */
 
 @media (max-width: 1280px) {
-  .bible-grid {
-    grid-template-columns: 1fr;
-    overflow: auto;
-  }
-
-  .bible-live-control-header,
-  .bible-preview-action-layout {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
   .sidebar {
     width: 250px;
     flex-basis: 250px;
@@ -3113,10 +3344,6 @@ button:disabled {
 @media (max-width: 1120px) {
   .bible-form-grid {
     grid-template-columns: 1fr;
-  }
-
-  .bible-grid {
-    overflow: auto;
   }
 
   .bible-projection-mode-pills {
@@ -3306,3 +3533,269 @@ button:disabled {
     flex-direction: column;
   }
 }
+
+.keyboard-status {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.keyboard-panel {
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+}
+
+.keyboard-panel-active {
+  outline-color: #7184ad;
+}
+
+.side-link[data-keyboard-highlight="true"] {
+  outline: 2px solid #a8bce8;
+  outline-offset: -3px;
+}
+
+/* Shared selectable-card treatment. The inset stroke adds a second border
+   pixel without changing card dimensions, padding, or scroll geometry. */
+:is(.song-item, .service-song, .event-card):hover {
+  border-color: #b7cae8;
+  background: #fafcff;
+  box-shadow: 0 2px 6px rgba(30, 51, 84, 0.04);
+}
+
+:is(.song-item.selected, .service-song.selected, .service-song.keyboard-song-highlight, .event-card.keyboard-event-highlight) {
+  border-color: var(--blue);
+  background: #f2f7ff;
+  box-shadow:
+    inset 0 0 0 1px var(--blue),
+    inset 3px 0 0 var(--blue),
+    0 3px 9px rgba(45, 105, 215, 0.10);
+  outline: none;
+}
+
+.song-item.selected .song-copy strong,
+:is(.service-song.selected, .service-song.keyboard-song-highlight) .service-song-copy strong,
+.event-card.keyboard-event-highlight h3 {
+  font-weight: 800;
+}
+
+/* Keep a deliberate focus cue for unselected cards; selected cards already
+   have the stronger blue border. Child buttons retain their focus styles. */
+:is(.song-item, .service-song, .event-card):focus-visible:not(.selected):not(.keyboard-song-highlight):not(.keyboard-event-highlight) {
+  outline: 2px solid #b7cae8;
+  outline-offset: 2px;
+}
+
+/* Right-side preparation controls only; projector output and scroll mechanics
+   retain their existing styles and dimensions. */
+.right-console {
+  background: var(--surface);
+  border: 1px solid #e6eaf0;
+  border-radius: 20px;
+  box-shadow: 0 6px 22px rgba(30, 51, 84, 0.06);
+}
+
+.right-console.keyboard-panel-active {
+  outline-color: #a8bce8;
+}
+
+.right-console .prepare-workspace-tabs {
+  padding: 14px 16px 4px;
+  gap: 8px;
+}
+
+.right-console .prepare-workspace-tab {
+  min-height: 40px;
+  padding: 9px 20px;
+  border-radius: 12px;
+  border-color: #e1e7ef;
+  background: #f8fafc;
+  color: #59667a;
+}
+
+.right-console .prepare-workspace-tab.active {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+}
+
+.right-console .current-song-card {
+  border: 0;
+  box-shadow: none;
+  border-radius: 18px;
+  padding: 20px 16px;
+}
+
+.right-console .current-song-card .current-heading {
+  gap: 16px;
+  padding-bottom: 4px;
+}
+
+.right-console .current-song-card .card-kicker {
+  margin-bottom: 8px;
+  color: #7b8596;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+}
+
+.right-console .current-song-card .current-heading h3 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.3;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.right-console .current-song-card .author {
+  margin-top: 7px;
+  line-height: 1.5;
+  color: #7b8596;
+}
+
+.right-console .learning-mode-panel {
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid #edf0f5;
+  border-radius: 16px;
+  background: #f6f8fc;
+}
+
+.right-console .learning-mode-header {
+  align-items: center;
+  gap: 16px;
+}
+
+.right-console .learning-mode-header > .button {
+  flex-shrink: 0;
+  border-radius: 12px;
+}
+
+.right-console .learning-mode-copy-wrap .small-title {
+  color: var(--text);
+  font-size: 13px;
+  margin-bottom: 5px;
+}
+
+.right-console .current-song-controls {
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.right-console .song-language-pills {
+  flex-wrap: wrap;
+}
+
+.right-console .song-language-pill {
+  flex: 1 0 auto;
+  min-width: max-content;
+}
+
+.right-console .section-control-area {
+  border-left: 1px solid #e6eaf0;
+  padding-left: 16px;
+  width: 100%;
+}
+
+.right-console .song-language-pill,
+.right-console .section-pill {
+  min-height: 36px;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.right-console .song-language-pill.active:not(:disabled) {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+}
+
+.right-console .prepared-song-preview {
+  margin-top: 24px;
+  padding: 16px;
+  gap: 12px;
+  border-radius: 18px;
+  border-color: #e6ebf2;
+  background: #f7f9fc;
+  box-shadow: 0 3px 12px rgba(30, 51, 84, 0.04);
+}
+
+.right-console .prepared-song-preview > .small-title {
+  font-size: 13px;
+  color: #59667a;
+}
+
+.right-console .prepared-song-preview > strong {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.right-console .prepared-song-preview .projector-screen {
+  border-radius: 14px;
+  box-shadow: 0 4px 14px rgba(30, 51, 84, 0.10);
+}
+
+.right-console .prepared-song-preview .button {
+  min-height: 38px;
+  border-radius: 12px;
+  padding: 9px 14px;
+}
+
+.right-console .prepared-song-preview .current-actions,
+.right-console .prepared-song-preview .projection-controls {
+  gap: 8px;
+}
+
+/* Existing third control is Black / Show Screen; its handler is unchanged. */
+.right-console .prepared-song-preview .projection-controls > .button:nth-child(3) {
+  background: #263244;
+  border-color: #263244;
+  color: #fff;
+}
+
+.right-console .prepared-song-preview .background-selector {
+  padding-top: 12px;
+  border-top: 1px solid #e6ebf2;
+}
+
+.right-console .prepared-song-preview .background-option {
+  border-radius: 12px;
+}
+
+@media (max-width: 600px) {
+  .right-console .current-song-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .right-console .section-control-area {
+    border-left: 0;
+    padding-left: 0;
+  }
+}
+
+/* Reserve room for three compact section controls on desktop. */
+@media (min-width: 601px) {
+  .right-console .current-song-controls {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 228px);
+  }
+}
+
+.right-console .section-pills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.right-console .section-pill {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 8px;
+  white-space: nowrap;
+}
+
+.network-access-panel { flex-shrink: 0; margin-bottom: 20px; overflow-wrap: anywhere; }
+.network-access-panel p, .network-access-panel li { margin: 10px 0; }
+.network-access-panel a { color: #2563eb; text-decoration: underline; }
