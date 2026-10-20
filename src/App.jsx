@@ -16,6 +16,7 @@ import './responsive.css'
 import NotesPanel from './NotesPanel'
 import NoteProjector from './NoteProjector'
 import BibleProjector from './BibleProjector'
+import { findCreoleTranslation, contiguousVerseRanges } from './bibleProjectorBlocks'
 import { nextNoteNavigation } from './noteScroll'
 import { selectedEvents, liveVerseIndex, noteValidation } from './operatorFeatures'
 import { birthdayDateLabel } from './birthdayDates'
@@ -25,6 +26,7 @@ import { announceProjectorReady, createProjectorConnection } from './projectorCo
 import { formatEventDateRange, isUpcomingEvent, validateEventDates } from './eventDates'
 import {
   loadBackgroundImage,
+  loadLatestBackgroundImage,
   saveBackgroundImage,
 } from './backgroundStorage'
 
@@ -62,6 +64,7 @@ const DEFAULT_PROJECTION_SETTINGS = {
 }
 
 const BACKGROUND_OPTIONS = [
+  { id: 'black', textTheme: 'light', name: 'Black', swatchClassName: 'background-swatch background-swatch-black' },
   {
     id: 'sky-field',
     textTheme: 'dark',
@@ -154,9 +157,11 @@ const BIBLE_PROJECTION_MODES = {
   ENGLISH: 'ENGLISH',
   SPANISH: 'SPANISH',
   FRENCH_ENGLISH: 'FRENCH_ENGLISH',
+  TRILINGUAL: 'TRILINGUAL',
 }
 
 const BIBLE_PROJECTION_LANGUAGE_OPTIONS = [
+  { value: BIBLE_PROJECTION_MODES.TRILINGUAL, label: 'English + Français + Kreyòl' },
   {
     value: BIBLE_PROJECTION_MODES.FRENCH,
     label: 'Français',
@@ -564,6 +569,7 @@ function createBiblePreviewPassage({
   frenchPassage,
   englishPassage,
   spanishPassage,
+  creolePassage,
   referenceTranslationCode,
 }) {
   const hasFrench =
@@ -581,8 +587,9 @@ function createBiblePreviewPassage({
     return null
   }
 
+  if (mode === BIBLE_PROJECTION_MODES.TRILINGUAL && (!hasFrench || !hasEnglish || !creolePassage?.verses?.length)) return null
   const effectiveMode =
-    mode === BIBLE_PROJECTION_MODES.ENGLISH
+    mode === BIBLE_PROJECTION_MODES.TRILINGUAL ? mode : mode === BIBLE_PROJECTION_MODES.ENGLISH
       ? BIBLE_PROJECTION_MODES.ENGLISH
       : mode ===
             BIBLE_PROJECTION_MODES.SPANISH
@@ -610,7 +617,7 @@ function createBiblePreviewPassage({
           frenchPassage ||
           englishPassage
       : frenchPassage || englishPassage)
-  const verseNumbers = (
+  let verseNumbers = (
     sourcePassage?.verses || []
   ).map((verse) => verse.verseNumber)
 
@@ -633,6 +640,8 @@ function createBiblePreviewPassage({
       )
     )
 
+  const creoleVerses = new Map((creolePassage?.verses || []).map(verse => [verse.verseNumber, verse.text]))
+  if (effectiveMode === BIBLE_PROJECTION_MODES.TRILINGUAL) verseNumbers = verseNumbers.filter(n => englishVersesByNumber[n]?.text && frenchVersesByNumber[n]?.text && creoleVerses.get(n))
   const verses = verseNumbers.map(
     (verseNumber) => {
       const frenchVerse =
@@ -677,6 +686,7 @@ function createBiblePreviewPassage({
 
       return {
         verseNumber,
+        ...(effectiveMode === BIBLE_PROJECTION_MODES.TRILINGUAL ? { creoleText: creoleVerses.get(verseNumber) } : {}),
         primaryText: frenchVerse?.text || '',
         secondaryText:
           englishVerse?.text || '',
@@ -715,6 +725,7 @@ function createBiblePreviewPassage({
     ),
     reference,
     translationCode:
+      effectiveMode === BIBLE_PROJECTION_MODES.TRILINGUAL ? `${englishPassage.translationCode}+${BIBLE_TRANSLATION_CODES.FRENCH}+${creolePassage.translationCode}` :
       effectiveMode ===
       BIBLE_PROJECTION_MODES.FRENCH
         ? BIBLE_TRANSLATION_CODES.FRENCH
@@ -726,6 +737,7 @@ function createBiblePreviewPassage({
             ? BIBLE_TRANSLATION_CODES.SPANISH
           : `${BIBLE_TRANSLATION_CODES.FRENCH}+${BIBLE_TRANSLATION_CODES.ENGLISH}`,
     translationName:
+      effectiveMode === BIBLE_PROJECTION_MODES.TRILINGUAL ? [englishPassage.translationName, frenchPassage.translationName, creolePassage.translationName].filter(Boolean).join(' + ') :
       effectiveMode ===
       BIBLE_PROJECTION_MODES.FRENCH
         ? 'Louis Segond 1910'
@@ -737,6 +749,7 @@ function createBiblePreviewPassage({
             ? 'Reina-Valera 1909'
           : 'Louis Segond 1910 + King James Version',
     translations: {
+      HAITIAN_CREOLE: creolePassage || null,
       FRENCH: hasFrench
         ? {
             ...frenchPassage,
@@ -3132,7 +3145,7 @@ function ProjectorDisplay({
     }
   }
 
-  const bibleProjector = showFullscreenControl && projectionContentType === PROJECTION_CONTENT_TYPES.BIBLE
+  const bibleProjector = projectionContentType === PROJECTION_CONTENT_TYPES.BIBLE
   const customBackgroundStyle =
     !bibleProjector &&
     backgroundType === 'custom' &&
@@ -3289,7 +3302,7 @@ function ProjectorDisplay({
               PROJECTION_CONTENT_TYPES.BIBLE &&
             biblePassage &&
             currentBibleVerse && (
-              bibleProjector ? <BibleProjector passage={biblePassage} verse={currentBibleVerse} maxFontSize={lyricsSizing.maxFontSize} /> : <div className="screen-content screen-content-bible">
+              bibleProjector ? <BibleProjector passage={biblePassage} verse={currentBibleVerse} maxFontSize={showFullscreenControl ? lyricsSizing.maxFontSize : 34} /> : <div className="screen-content screen-content-bible">
                 <div className="screen-reference">
                   {biblePassage.reference}
                 </div>
@@ -3357,6 +3370,12 @@ function App() {
   const isProjectorWindow =
     getProjectorWindowState()
 
+  const [savedCustomBackground, setSavedCustomBackground] = useState(null)
+  useEffect(() => {
+    let active = true
+    loadLatestBackgroundImage().then(record => { if (active) setSavedCustomBackground(record) }).catch(() => {})
+    return () => { active = false }
+  }, [])
   const [activeView, setActiveView] =
     useState('operator')
   const [projectedNote, setProjectedNote] = useState('')
@@ -3653,6 +3672,8 @@ function App() {
     setIsLoadingSelectedSongMelodyReference,
   ] = useState(false)
   const [bibleBooks, setBibleBooks] = useState([])
+  const [creoleTranslation, setCreoleTranslation] = useState(null)
+  const [preparedBibleProjection, setPreparedBibleProjection] = useState(null)
   const [
     bibleTranslations,
     setBibleTranslations,
@@ -4637,6 +4658,7 @@ function App() {
         )
       }
 
+      setCreoleTranslation(findCreoleTranslation(data))
       const prioritizedTranslations =
         data
           .filter((translation) =>
@@ -5295,7 +5317,9 @@ function App() {
     referenceTranslationCode =
       referenceBibleTranslationCode
   ) {
+    if (projectionMode === BIBLE_PROJECTION_MODES.TRILINGUAL && !creoleTranslation) throw new Error('Install a real Kreyòl Bible dataset before enabling three languages.')
     const requiredTranslations =
+      projectionMode === BIBLE_PROJECTION_MODES.TRILINGUAL ? [BIBLE_TRANSLATION_CODES.FRENCH, 'WEB', creoleTranslation.code] :
       projectionMode === BIBLE_PROJECTION_MODES.FRENCH
         ? [BIBLE_TRANSLATION_CODES.FRENCH]
         : projectionMode === BIBLE_PROJECTION_MODES.ENGLISH
@@ -5336,40 +5360,33 @@ function App() {
           )
         }
 
-        const response = await fetch(
-          `${API_BASE_URL}/bible/passage?${new URLSearchParams({
-            book: selection.bookKey,
-            chapter: String(selection.chapter),
-            startVerse: String(startVerse),
-            endVerse: String(endVerse),
-            translation,
-          }).toString()}`
-        )
-
-        if (!response.ok) {
-          throw new Error(
-            (await readErrorMessage(response)) ||
-              `Could not load the ${translation} Bible passage.`
-          )
-        }
-
-        return [translation, await response.json()]
+        const ranges = projectionMode === BIBLE_PROJECTION_MODES.TRILINGUAL
+          ? contiguousVerseRanges(availableVerseNumbers) : [[startVerse, endVerse]]
+        const parts = await Promise.all(ranges.map(async ([start, end]) => {
+          const response = await fetch(`${API_BASE_URL}/bible/passage?${new URLSearchParams({
+            book: selection.bookKey, chapter: String(selection.chapter),
+            startVerse: String(start), endVerse: String(end), translation,
+          })}`)
+          if (!response.ok) throw new Error((await readErrorMessage(response)) || `Could not load the ${translation} Bible passage.`)
+          return response.json()
+        }))
+        return [translation, { ...parts[0], startVerse, endVerse, verses: parts.flatMap(part => part.verses) }]
       })
     )
     const passagesByTranslation = Object.fromEntries(passages)
 
     return {
+      creolePassage: passagesByTranslation[creoleTranslation?.code] || null,
       frenchPassage:
         passagesByTranslation[BIBLE_TRANSLATION_CODES.FRENCH] || null,
       englishPassage:
-        passagesByTranslation[BIBLE_TRANSLATION_CODES.ENGLISH] || null,
+        passagesByTranslation[projectionMode === BIBLE_PROJECTION_MODES.TRILINGUAL ? 'WEB' : BIBLE_TRANSLATION_CODES.ENGLISH] || null,
       spanishPassage:
         passagesByTranslation[BIBLE_TRANSLATION_CODES.SPANISH] || null,
     }
   }
 
   function navigateProjectedBibleVerse(direction) {
-    if (networkCommand(direction > 0 ? 'NEXT' : 'PREVIOUS')) return
     if (
       projectionContentType !== PROJECTION_CONTENT_TYPES.BIBLE ||
       !projectedBiblePassage?.verses?.length
@@ -5377,6 +5394,7 @@ function App() {
       return
     }
 
+    if (networkCommand(direction > 0 ? 'NEXT' : 'PREVIOUS')) return
     setProjectedBibleVerseIndex((currentIndex) => {
       const nextIndex = currentIndex + direction
 
@@ -5453,6 +5471,7 @@ function App() {
       const chapterBiblePassage =
         createBiblePreviewPassage({
           mode: bibleProjectionMode,
+          creolePassage: chapterPassageData.creolePassage,
           frenchPassage:
             chapterPassageData.frenchPassage,
           englishPassage:
@@ -5478,6 +5497,8 @@ function App() {
             verse.verseNumber ===
             preparedVerse
         )
+
+      if (bibleProjectionMode === BIBLE_PROJECTION_MODES.TRILINGUAL && targetVerseIndex < 0) throw new Error('This verse is not available in all three translations. Select a shared verse or another projection mode.')
 
       if (
         projectionContentType ===
@@ -5534,6 +5555,7 @@ function App() {
   function handleBibleProjectionModeChange(
     nextMode
   ) {
+    if (nextMode === BIBLE_PROJECTION_MODES.TRILINGUAL && !creoleTranslation) return
     setBibleProjectionMode(nextMode)
 
     if (
@@ -5546,6 +5568,7 @@ function App() {
     const nextProjectedBiblePassage =
       createBiblePreviewPassage({
         mode: nextMode,
+        creolePassage: projectedBiblePassage.translations?.HAITIAN_CREOLE || null,
         frenchPassage:
           projectedBiblePassage.translations
             ?.FRENCH || null,
@@ -6352,6 +6375,18 @@ function App() {
         referenceBibleTranslationCode,
       ]
     )
+  useEffect(() => {
+    let cancelled = false
+    setPreparedBibleProjection(null)
+    if (!previewBiblePassageData) return
+    loadBiblePassageSet(bibleSelection, bibleProjectionMode, referenceBibleTranslationCode)
+      .then(data => {
+        const passage = createBiblePreviewPassage({ mode: bibleProjectionMode, ...data, referenceTranslationCode: referenceBibleTranslationCode })
+        if (!cancelled) setPreparedBibleProjection(passage)
+      })
+      .catch(err => { if (!cancelled) setError(err.message) })
+    return () => { cancelled = true }
+  }, [previewBiblePassageData, bibleProjectionMode, creoleTranslation?.code])
   const selectedBibleBook = useMemo(
     () =>
       findBibleBook(
@@ -6658,20 +6693,8 @@ function App() {
     currentSongSourceId ??
     currentSongResolved?.id ??
     null
-  const canGoToPreviousProjection =
-    previewProjectionContentType ===
-    PROJECTION_CONTENT_TYPES.BIBLE
-      ? projectedBibleVerseIndex > 0
-      : currentSongSectionIndex > 0
-  const canGoToNextProjection =
-    previewProjectionContentType ===
-    PROJECTION_CONTENT_TYPES.BIBLE
-      ? projectedBibleVerseIndex <
-        (projectedBiblePassage?.verses
-          ?.length || 0) -
-          1
-      : currentSongSectionIndex <
-        currentSongSections.length - 1
+  const canGoToPreviousProjection = currentSongSectionIndex > 0
+  const canGoToNextProjection = currentSongSectionIndex < currentSongSections.length - 1
   const liveBibleReference =
     isBibleProjectionActive &&
     currentBibleVerse
@@ -10085,63 +10108,12 @@ function App() {
   }
 
   function previousSection() {
-    if (prepareMode === 'bible') {
-      moveBiblePreviewVerse(-1)
-      return
-    }
-
-    if (
-      previewProjectionContentType ===
-      PROJECTION_CONTENT_TYPES.BIBLE
-    ) {
-      if (networkCommand('PREVIOUS')) return
-      if (projectedBibleVerseIndex > 0) {
-        setProjectedBibleVerseIndex(
-          (current) => current - 1
-        )
-        setProjectionMode((currentMode) =>
-          getNavigationProjectionMode(
-            currentMode
-          )
-        )
-      }
-
-      return
-    }
-
+    if (prepareMode === 'bible') { moveBiblePreviewVerse(-1); return }
     moveOperatorPreviewSection(-1)
   }
 
   function nextSection() {
-    if (prepareMode === 'bible') {
-      moveBiblePreviewVerse(1)
-      return
-    }
-
-    if (
-      previewProjectionContentType ===
-      PROJECTION_CONTENT_TYPES.BIBLE
-    ) {
-      if (networkCommand('NEXT')) return
-      if (
-        projectedBibleVerseIndex <
-        (projectedBiblePassage?.verses
-          ?.length || 0) -
-          1
-      ) {
-        setProjectedBibleVerseIndex(
-          (current) => current + 1
-        )
-        setProjectionMode((currentMode) =>
-          getNavigationProjectionMode(
-            currentMode
-          )
-        )
-      }
-
-      return
-    }
-
+    if (prepareMode === 'bible') { moveBiblePreviewVerse(1); return }
     moveOperatorPreviewSection(1)
   }
 
@@ -10225,6 +10197,19 @@ function App() {
     }
   }
 
+  async function selectCustomBackground() {
+    try {
+      const record = await loadBackgroundImage(savedCustomBackground?.id || customBackgroundId)
+      if (!record?.file) throw new Error('Custom background image is unavailable. Upload it again.')
+      const data = networkProjectorRef.current?.mode === 'network' ? await networkBackgroundFile(record.file) : null
+      setCustomBackgroundId(record.id)
+      setCustomBackgroundName(record.fileName)
+      setBackgroundType('custom')
+      setNetworkBackgroundData(data)
+      networkCommand('BACKGROUND_CHANGE', { backgroundType: 'custom', customBackgroundId: record.id, customBackgroundName: record.fileName, customBackgroundData: data })
+    } catch (err) { setError(err.message) }
+  }
+
   async function handleBackgroundUpload(
     event
   ) {
@@ -10253,6 +10238,7 @@ function App() {
           file,
         })
 
+      setSavedCustomBackground(savedBackground)
       setCustomBackgroundId(
         savedBackground.id
       )
@@ -11672,6 +11658,8 @@ function App() {
                                 </span>
                               </button>
                             ))}
+                            {(customBackgroundId || savedCustomBackground) && <button type="button" className="background-option" onClick={selectCustomBackground}>Custom</button>}
+                            <button type="button" className="background-option" onClick={() => backgroundInputRef.current?.click()}>Upload Background</button>
                           </div>
                         </div>
 
@@ -11864,6 +11852,8 @@ function App() {
                                 (option) => (
                                   <button
                                     key={option.value}
+                                    disabled={option.value === BIBLE_PROJECTION_MODES.TRILINGUAL && !creoleTranslation}
+                                    title={option.value === BIBLE_PROJECTION_MODES.TRILINGUAL && !creoleTranslation ? 'A real Kreyòl Bible dataset must be installed first.' : undefined}
                                     type="button"
                                     className={[
                                       'bible-projection-mode-pill',
@@ -11885,6 +11875,12 @@ function App() {
                               )}
                             </div>
                           </div>
+
+                          {preparedBibleProjection && <details className="bible-presentation-preview">
+                            <summary>Projector Preview (prepared — not live)</summary>
+                            <ProjectorDisplay projectionContentType={PROJECTION_CONTENT_TYPES.BIBLE} biblePassage={preparedBibleProjection}
+                              bibleVerseIndex={Math.max(0, preparedBibleProjection.verses.findIndex(v => v.verseNumber === bibleSelection.startVerse))} projectionMode="LIVE" />
+                          </details>}
 
                           <div className="bible-reading-header">
                             <p className="small-title">
@@ -12002,6 +11998,13 @@ function App() {
                     </div>
                   )}
 
+                <input
+                  ref={backgroundInputRef}
+                  className="background-upload-input"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={handleBackgroundUpload}
+                />
                 {false && (
                   <>
                 <div className="preview-title-row">
@@ -12167,13 +12170,7 @@ function App() {
                   </div>
                 </div>
 
-                <input
-                  ref={backgroundInputRef}
-                  className="background-upload-input"
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  onChange={handleBackgroundUpload}
-                />
+
 
                 {backgroundType === 'custom' &&
                   customBackgroundName && (

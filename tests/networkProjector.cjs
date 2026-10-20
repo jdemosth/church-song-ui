@@ -102,6 +102,13 @@ const { spawn, execFileSync } = require('node:child_process');
     const shown=text=>p.getByText(text,{exact:true}).waitFor();
     async function prepare(id=1) {await nav(o,'Worship Console');await o.getByRole('button',{name:'Song',exact:true}).click();await o.locator('.playlist-select').selectOption(String(id));await o.locator('.right-console .current-heading h3').click()}
     if (host !== '127.0.0.1') assert.equal(await o.evaluate(()=>window.isSecureContext),false);
+    if (process.env.BIBLE_RELEASE_ONLY) {
+      await prepare();await o.getByRole('button',{name:'Bible',exact:true}).click();
+      await require('./bibleProjectorLayout.cjs')(o,p,serverOrigin);
+      await require('./hat1985Projection.cjs')(o,p,serverOrigin);
+      await require('./trilingualBible.cjs')(o,p);
+      assert.deepEqual(errors,[]);return;
+    }
     await blank();
     await prepare(); await blank(); assert.equal(commands.length,0);
     await o.keyboard.press('Enter'); await shown('Song 1 first section');
@@ -144,8 +151,9 @@ const { spawn, execFileSync } = require('node:child_process');
     await o.locator('.right-console .current-heading h3').click();await o.keyboard.press('Enter');await p.getByText('Bible verse 1',{exact:false}).first().waitFor();
     await p.reload();await blank();await o.keyboard.press('Enter');await p.getByText('Bible verse 1',{exact:false}).first().waitFor();
     await o.keyboard.press('ArrowDown');await p.getByText('Bible verse 2',{exact:false}).first().waitFor();
+    await require('./releaseProjectionScenarios.cjs')(o,p);
     await nav(o,'Settings');await o.locator('select[name="defaultBackground"]').selectOption('sunrise');await o.getByRole('button',{name:'Save Settings',exact:true}).click();
-    await p.locator('.projector-screen-sunrise').waitFor();
+    await prepare();await o.keyboard.press('Enter');await p.locator('.projector-screen-sunrise').waitFor();
     // Exercise portable custom-background bytes through the real protocol, not a local blob URL.
     await o.evaluate(async()=>{
       const socket=new WebSocket(location.origin.replace(/^http/,'ws')+'/projector/ws');
@@ -185,6 +193,8 @@ const { spawn, execFileSync } = require('node:child_process');
     await p.getByText('Bible verse 2',{exact:false}).first().waitFor();
     console.log('PASS extended connection session and 35-second frozen operator/projector: same sockets, current display preserved');
     await require('./bibleProjectorLayout.cjs')(o,p,serverOrigin);
+    await require('./hat1985Projection.cjs')(o,p,serverOrigin);
+    await require('./trilingualBible.cjs')(o,p);
     await remote.context.close();await p.locator('.bible-projector-verse').first().waitFor();
     assert.equal(await windows.context.pages().length,1,'Remote send does not open duplicate projector');
     assert.deepEqual(errors,[]);

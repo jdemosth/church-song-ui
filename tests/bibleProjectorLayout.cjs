@@ -1,13 +1,17 @@
 const assert = require('node:assert/strict');
 module.exports = async function (operator, projector, origin) {
  let passages;
- await operator.route('**/bible/passage?**', route => route.fulfill({json:passages[new URL(route.request().url()).searchParams.get('translation')]}));
+ await operator.route('**/bible/**', route => route.continue());
+ await operator.reload();await operator.locator('.playlist-select').selectOption('1');await operator.getByRole('button',{name:'Bible',exact:true}).click();
  for (const [book,chapter,start,end] of [['JOHN',3,16,18],['ESTHER',8,9,9]]) {
   passages={};
   for (const code of ['KJV','LSG1910']) {
    const r=await fetch(`${origin}/bible/passage?translation=${code}&book=${book}&chapter=${chapter}&startVerse=${start}&endVerse=${end}`);
    assert(r.ok);passages[code]=await r.json();
   }
+  await operator.locator('label.bible-form-field').filter({has:operator.getByText('Book',{exact:true})}).locator('select').selectOption(book);
+  await operator.locator('label.bible-form-field').filter({has:operator.getByText('Chapter',{exact:true})}).locator('select').selectOption(String(chapter));
+  await operator.locator('label.bible-form-field').filter({has:operator.getByText('Start Verse',{exact:true})}).locator('select').selectOption(String(start));
   await operator.getByRole('button',{name:'Preview Passage',exact:true}).click();
   await operator.locator('.bible-projection-mode-pills').getByRole('button',{name:'Français + English',exact:true}).click();
   await operator.locator('.bible-live-nav-buttons').getByRole('button',{name:'Send to Projector',exact:true}).click();
@@ -27,7 +31,7 @@ module.exports = async function (operator, projector, origin) {
   if(end>start){
    const jump=operator.getByLabel('Live verse number',{exact:true});await jump.fill('18');await jump.press('Enter');await projector.getByText(passages.KJV.verses[2].text,{exact:true}).waitFor();
    await operator.locator('.right-console .current-heading h3').click();await operator.keyboard.press('ArrowUp');await projector.getByText(passages.KJV.verses[1].text,{exact:true}).waitFor();
-   await operator.keyboard.press('ArrowDown');await projector.getByText(passages.KJV.verses[2].text,{exact:true}).waitFor();
+   await operator.locator('.right-console .current-heading h3').click();await operator.keyboard.press('ArrowDown');await projector.getByText(passages.KJV.verses[2].text,{exact:true}).waitFor();
   }
   await operator.locator('.right-console .current-heading h3').click();await operator.keyboard.press('b');await projector.locator('.projector-screen.black').waitFor();assert.equal(await projector.locator('.bible-projector-verse').count(),0);
   await operator.keyboard.press('b');await projector.locator('.bible-projector-verse').first().waitFor();

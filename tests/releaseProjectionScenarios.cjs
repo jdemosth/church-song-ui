@@ -1,0 +1,25 @@
+const assert = require('node:assert/strict');
+module.exports = async (o,p) => {
+ const before=await p.locator('.projector-screen').innerText();
+ await o.getByRole('button',{name:'Song',exact:true}).click();
+ await o.locator('.playlist-select').selectOption('1');
+ const nav=o.locator('#live-controls');
+ await nav.getByRole('button',{name:'Next →',exact:true}).click();
+ assert.equal(await p.locator('.projector-screen').innerText(),before,'song Next cannot move live Bible');
+ await nav.getByRole('button',{name:'← Previous',exact:true}).click();
+ assert.equal(await p.locator('.projector-screen').innerText(),before,'song Previous cannot move live Bible');
+ await o.locator('.prepared-song-preview').getByRole('button',{name:'Send to Projector',exact:true}).click();
+ await p.getByText('Song 1 first section',{exact:true}).waitFor();
+ await nav.getByRole('button',{name:'Next →',exact:true}).click();await p.getByText('Song 1 second section',{exact:true}).waitFor();
+ await nav.getByRole('button',{name:'← Previous',exact:true}).click();await p.getByText('Song 1 first section',{exact:true}).waitFor();
+ await o.locator('.background-selector').getByRole('button',{name:'Black',exact:true}).click();await p.locator('.projector-screen-black').waitFor();
+ assert.equal(await p.locator('.projector-screen').evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(0, 0, 0)');
+ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==','base64');
+ await o.locator('input.background-upload-input').setInputFiles({name:'release-test.png',mimeType:'image/png',buffer:png});
+ const custom=()=>p.waitForFunction(()=>document.querySelector('.projector-screen').style.backgroundImage.includes('data:image/png'));
+ await custom();await o.reload();await o.getByRole('button',{name:'Song',exact:true}).click();await o.locator('.playlist-select').selectOption('1');await custom();
+ await o.locator('.background-selector').getByRole('button',{name:'Black',exact:true}).click();await p.locator('.projector-screen-black').waitFor();
+ await o.getByRole('button',{name:'Custom',exact:true}).click();await custom();
+ assert(await o.evaluate(()=>new Promise((resolve,reject)=>{const r=indexedDB.open('church-song-ui');r.onsuccess=()=>{const q=r.result.transaction('projection-backgrounds').objectStore('projection-backgrounds').getAll();q.onsuccess=()=>resolve(q.result.some(x=>x.fileName==='release-test.png'&&x.file.size>0));q.onerror=reject};r.onerror=reject})));
+ console.log('PASS Song controls respect Bible ownership; Song controls remain live; black/custom upload, reload persistence and reselect');
+};

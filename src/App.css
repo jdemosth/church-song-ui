@@ -3799,3 +3799,5 @@ button:disabled {
 .network-access-panel { flex-shrink: 0; margin-bottom: 20px; overflow-wrap: anywhere; }
 .network-access-panel p, .network-access-panel li { margin: 10px 0; }
 .network-access-panel a { color: #2563eb; text-decoration: underline; }
+
+.projector-screen-black, .background-swatch-black { background: #000; color: #fff; }

@@ -92,3 +92,13 @@ export async function loadBackgroundImage(id) {
     }
   })
 }
+
+// Keep the most recent local upload available after selecting a preset.
+export async function loadLatestBackgroundImage() {
+  const database = await openDatabase()
+  return new Promise((resolve, reject) => {
+    const request = database.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).getAll()
+    request.onsuccess = () => resolve(request.result.sort((a, b) => b.updatedAt - a.updatedAt)[0] || null)
+    request.onerror = () => reject(request.error)
+  })
+}

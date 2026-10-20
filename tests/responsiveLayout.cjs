@@ -142,7 +142,7 @@ const title='Grace and Peace for Every Generation WithALongUnbrokenTitleToCheckW
   await prep.getByRole('button',{name:'← Previous',exact:true}).click();await projector.getByText('Song 1 first section',{exact:true}).waitFor();
   await prep.getByRole('button',{name:'Clear Lyrics',exact:true}).click();await projector.locator('.screen-lyrics').waitFor({state:'hidden'});
   await prep.getByRole('button',{name:'Show Lyrics',exact:true}).click();await projector.getByText('Song 1 first section',{exact:true}).waitFor();
-  await prep.getByRole('button',{name:'Black',exact:true}).click();await projector.locator('.projector-screen.black').waitFor();
+  await prep.locator('#live-controls').getByRole('button',{name:'Black',exact:true}).click();await projector.locator('.projector-screen.black').waitFor();
   await prep.getByRole('button',{name:'Show Screen',exact:true}).click();await projector.getByText('Song 1 first section',{exact:true}).waitFor();
   await projector.reload();assert.equal((await projector.locator('.projector-screen').innerText()).trim(),'');
   await prep.getByRole('button',{name:'Send to Projector',exact:true}).click();await projector.getByText('Song 1 first section',{exact:true}).waitFor();
