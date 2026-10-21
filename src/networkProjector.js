@@ -1,3 +1,4 @@
+import { isHosted, selectedProjectorSession } from './browserScope.js'
 // No live commands are queued. A fresh document never admits a cached live snapshot.
 export function projectorId() {
   if (globalThis.crypto?.randomUUID) return crypto.randomUUID()
@@ -8,18 +9,39 @@ export function projectorId() {
 
 export function createNetworkProjector({ baseUrl = '', role, onState, onStatus, onError,
   fetcher = globalThis.fetch, Socket = globalThis.WebSocket, origin = globalThis.location?.origin }) {
+  if (isHosted() && !selectedProjectorSession()) {
+    onStatus?.({ mode: 'disabled', ready: false, projectors: 0 })
+    return { mode: 'disabled', ready: false, projectors: 0, supportsContent: () => false,
+      command() { onError?.('Hosted projector sessions are not available yet.'); return true }, close() {} }
+  }
   let socket, timer, heartbeat, handshake, connection, stopped = false, epoch, sequence = 0, revision = -1
   let contentTypes = []
   let mode = 'probing', ready = false, projectors = 0, liveId = '', admittedId = null
   let pendingPing = null, lastTick = 0, attempt = 0
   const diagnostic = (event, details = {}) => console.info('[projector-websocket]', { event, role, connection, at: new Date().toISOString(), ...details })
   const status = () => onStatus?.({ mode, ready, projectors })
-  function connect() {
+  async function connect() {
     if (stopped) return
-    const url = new URL('/projector/ws', baseUrl || origin)
+    let ticket
+    const session = isHosted() ? selectedProjectorSession() : null
+    if (session) {
+      try {
+        const response = await fetcher(`${baseUrl}/projector/sessions/${encodeURIComponent(session)}/tickets`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role }) })
+        if (!response.ok) { const error = new Error('Projector join denied'); error.denied = [401,403,404,410].includes(response.status); throw error }
+        ticket = await response.json()
+        if (stopped) return
+      } catch (error) {
+        if (stopped) return
+        ready = false
+        if (error.denied) { mode = 'disabled'; status(); onError?.('Projector access denied. Choose an open authorized session.'); return }
+        status(); onError?.('Projector connection interrupted. The current display is preserved.')
+        timer = setTimeout(connect, 1500); return
+      }
+    }
+    const url = new URL(ticket?.path || '/projector/ws', baseUrl || origin)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
     diagnostic('connect-attempt', { attempt: ++attempt, host: url.host })
-    socket = new Socket(url)
+    socket = ticket ? new Socket(url, [`boc-ticket.${ticket.ticket}`]) : new Socket(url)
     handshake = setTimeout(() => { diagnostic('handshake-timeout'); socket.close(4002, 'Handshake timeout') }, 10000)
     socket.onopen = () => { diagnostic('open'); socket.send(JSON.stringify({ type: 'HELLO', role })) }
     socket.onmessage = event => {
@@ -73,6 +95,11 @@ export function createNetworkProjector({ baseUrl = '', role, onState, onStatus, 
     socket.onclose = (event = {}) => {
       diagnostic('closed', { code: event.code, reason: event.reason, clean: event.wasClean, intentional: stopped })
       if (stopped) return
+      if (event.code === 4003 || event.code === 1008) {
+        stopped = true; ready = false; mode = 'disabled'; clearInterval(heartbeat); clearTimeout(handshake); status()
+        onState?.({ projectionMode: 'CLEAR', projectionSong: null, liveSend: null }, { revoked: true })
+        onError?.('Projector access was revoked or the session closed.'); return
+      }
       ready = false; projectors = 0; clearTimeout(handshake); clearInterval(heartbeat); status()
       if (!stopped) {
         onError?.('Projector connection interrupted. The current display is preserved.')
@@ -90,7 +117,7 @@ export function createNetworkProjector({ baseUrl = '', role, onState, onStatus, 
       if (!response.ok && ![404, 501].includes(response.status)) throw new Error('Projector server unavailable')
       const value = response.ok ? await response.json() : null
       if (stopped) return
-      if (value?.protocol !== 'church-projector-v1') { mode = 'local'; status(); return }
+      if (value?.protocol !== 'church-projector-v1') { mode = isHosted() ? 'disabled' : 'local'; status(); return }
       contentTypes = Array.isArray(value.contentTypes) ? value.contentTypes : []
       mode = 'network'; status(); connect()
     } catch {

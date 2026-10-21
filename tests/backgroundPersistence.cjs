@@ -21,7 +21,14 @@ await projector.close();await operator.close();
 const bootstrap=await context.newPage();await bootstrap.goto(`${process.env.EVENTS_TEST_URL || 'http://127.0.0.1:5178'}/?projector=1`);
 for(const type of ['SONG','BIBLE','EVENT','BIRTHDAY_LIST']){
  const state={projectionContentType:type==='BIRTHDAY_LIST'?'EVENT':type,projectionMode:'LIVE',backgroundType:'preset',backgroundVariant:'deep-blue',projectionSong:type==='SONG'?song:null,projectedBiblePassage:type==='BIBLE'?{bookKey:'JOHN',chapter:1,reference:'John 1',projectionMode:'FRENCH',verses:[{verseNumber:1,text:'Bible text'}]}:null,projectedEvents:type==='EVENT'?[{id:2,title:'Event',eventDate:'2099-09-17',startTime:'12:00'}]:type==='BIRTHDAY_LIST'?[{id:3,eventType:'BIRTHDAY_LIST',birthdayMonth:9,birthdayEntries:[{name:'Person',month:9,day:1}]}]:[]};state.projectedEvent=state.projectedEvents[0]||null;
- await bootstrap.evaluate(state=>localStorage.setItem('church-song-projector-state',JSON.stringify(state)),state);await bootstrap.reload();await matches(bootstrap,'sunrise');await blank(bootstrap);console.log('PASS saved API background wins stale cache for',type);
+ await bootstrap.evaluate(state=>localStorage.setItem('church-song-projector-state',JSON.stringify(state)),state);await bootstrap.reload();
+ assert.equal(settings.defaultBackground,'sunrise');
+ if(type==='BIBLE'){
+  await matches(bootstrap,'bible');
+  const appearance=await bootstrap.locator('.projector-screen').evaluate(el=>({color:getComputedStyle(el).backgroundColor,image:getComputedStyle(el).backgroundImage}));
+  assert.deepEqual(appearance,{color:'rgb(0, 0, 0)',image:'none'},'Bible remains black without discarding the saved background');
+ }else await matches(bootstrap,'sunrise');
+ await blank(bootstrap);console.log('PASS saved API background retained and safe content-specific appearance for',type);
 }
 // Reopening preserves appearance but cannot restore cached live content.
 await blank(bootstrap);

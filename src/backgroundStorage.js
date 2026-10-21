@@ -1,3 +1,4 @@
+import { scopedKey } from './browserScope.js'
 const DATABASE_NAME = 'church-song-ui'
 const DATABASE_VERSION = 1
 const STORE_NAME = 'projection-backgrounds'
@@ -5,7 +6,7 @@ const STORE_NAME = 'projection-backgrounds'
 function openDatabase() {
   return new Promise((resolve, reject) => {
     const request = window.indexedDB.open(
-      DATABASE_NAME,
+      scopedKey(DATABASE_NAME),
       DATABASE_VERSION
     )
 

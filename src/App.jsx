@@ -1,3 +1,5 @@
+import { scopedStorage, scopedKey, storageEventKey, ScopedBroadcastChannel } from './browserScope.js'
+import { mapWorkingServicePlans, canReuseHistory, historyPreservationMessage } from './serviceHistory'
 import NetworkAccessPanel from './NetworkAccessPanel'
 import { createNetworkProjector, projectorId, networkBackgroundFile } from './networkProjector'
 import { API_BASE_URL } from './apiOrigin'
@@ -1934,7 +1936,7 @@ function readStoredProjectorState() {
   }
 
   try {
-    const rawState = window.localStorage.getItem(
+    const rawState = scopedStorage.getItem(
       PROJECTOR_STATE_KEY
     )
 
@@ -1951,7 +1953,7 @@ function readStoredProjectorSettings() {
 
   try {
     const rawSettings =
-      window.localStorage.getItem(
+      scopedStorage.getItem(
         PROJECTOR_SETTINGS_KEY
       )
 
@@ -1968,7 +1970,7 @@ function persistProjectorState(state) {
     return
   }
 
-  window.localStorage.setItem(
+  scopedStorage.setItem(
     PROJECTOR_STATE_KEY,
     JSON.stringify(state)
   )
@@ -1979,7 +1981,7 @@ function persistProjectorSettings(settings) {
     return
   }
 
-  window.localStorage.setItem(
+  scopedStorage.setItem(
     PROJECTOR_SETTINGS_KEY,
     JSON.stringify(settings)
   )
@@ -3933,7 +3935,6 @@ function App() {
   )
   const [
     reusedServiceSourceById,
-    setReusedServiceSourceById,
   ] = useState({})
   function handleSettingsChange(event) {
     const { name, value, type, checked } =
@@ -4236,6 +4237,11 @@ function App() {
 
   const receiveNetworkState = useEffectEvent((state, meta) => {
     if (!state) return
+    if (meta.revoked) {
+      setProjectionSong(null); setLiveSend(null)
+      setProjectorWindowState({ projectionMode: 'CLEAR', projectionSong: null, liveSend: null })
+      return
+    }
     if (state.backgroundType) projectorBackgroundSyncedRef.current = true
     if (isProjectorWindow) {
       if (meta.appearanceOnly) {
@@ -4378,13 +4384,13 @@ function App() {
       projectorConnectionRef.current = createProjectorConnection(() => {
         const url = new URL(window.location.href)
         url.searchParams.set('projector', '1')
-        return window.open(url.toString(), 'church-song-projector-window', 'popup=yes,width=1280,height=720')
+        return window.open(url.toString(), scopedKey('church-song-projector-window'), 'popup=yes,width=1280,height=720')
       })
     }
 
     if ('BroadcastChannel' in window) {
       projectorChannelRef.current =
-        new BroadcastChannel(
+        new ScopedBroadcastChannel(
           PROJECTOR_CHANNEL_NAME
         )
 
@@ -4495,7 +4501,7 @@ function App() {
     }
 
     if ('BroadcastChannel' in window) {
-      channel = new BroadcastChannel(
+      channel = new ScopedBroadcastChannel(
         PROJECTOR_CHANNEL_NAME
       )
 
@@ -4521,7 +4527,7 @@ function App() {
     }
 
     const handleStorage = (event) => {
-      if (event.key !== PROJECTOR_STATE_KEY) {
+      if (storageEventKey(event) !== PROJECTOR_STATE_KEY) {
         return
       }
 
@@ -7779,7 +7785,7 @@ function App() {
 
       setServicePlans((current) =>
         sortServicePlans(
-          current.map((servicePlan) => ({
+          mapWorkingServicePlans(current, (servicePlan) => ({
             ...servicePlan,
             songs: (
               servicePlan.songs || []
@@ -8289,7 +8295,7 @@ function App() {
 
       setServicePlans((current) =>
         sortServicePlans(
-          current.map((servicePlan) => ({
+          mapWorkingServicePlans(current, (servicePlan) => ({
             ...servicePlan,
             songs: (
               servicePlan.songs || []
@@ -8838,81 +8844,6 @@ function App() {
     }
   }
 
-  async function deleteCompletedHistoryService(
-    servicePlanToDelete
-  ) {
-    if (!servicePlanToDelete) {
-      return
-    }
-
-    const confirmed = window.confirm(
-      `Delete ${formatServiceOccurrenceName(servicePlanToDelete)}?\n\nThis completed service will be permanently removed from Service History.\n\nThis action cannot be undone.`
-    )
-
-    if (!confirmed) {
-      return
-    }
-
-    try {
-      setError('')
-      setSuccessMessage('')
-
-      const response = await fetch(
-        `${API_BASE_URL}/service-plans/history/${servicePlanToDelete.id}`,
-        {
-          method: 'DELETE',
-        }
-      )
-
-      if (!response.ok) {
-        const message =
-          await readErrorMessage(response)
-
-        throw new Error(
-          message ||
-            'Failed to delete service history record'
-        )
-      }
-
-      const remainingServicePlans =
-        servicePlans.filter(
-          (servicePlan) =>
-            servicePlan.id !==
-            servicePlanToDelete.id
-        )
-      const remainingHistory =
-        sortCompletedServicePlans(
-          remainingServicePlans.filter(
-            (servicePlan) =>
-              isCompletedServicePlan(
-                servicePlan
-              )
-          )
-        )
-
-      setServicePlans(remainingServicePlans)
-      setSelectedHistoryServicePlanId(
-        remainingHistory[0]?.id || null
-      )
-      setReusedServiceSourceById(
-        (current) =>
-          Object.fromEntries(
-            Object.entries(current).filter(
-              ([key]) =>
-                Number(key) !==
-                servicePlanToDelete.id
-            )
-          )
-      )
-      setSuccessMessage(
-        'Service history record deleted.'
-      )
-    } catch (err) {
-      setError(err.message)
-      setSuccessMessage('')
-    }
-  }
-
   function getCompletableServiceTarget() {
     if (
       loadedServicePlan &&
@@ -9079,7 +9010,7 @@ function App() {
   function openReuseServiceModal(
     servicePlan
   ) {
-    if (!servicePlan) {
+    if (!canReuseHistory(servicePlan)) {
       return
     }
 
@@ -13669,6 +13600,7 @@ function App() {
 
                           <button
                             className="button button-primary inline-button"
+                            disabled={!canReuseHistory(servicePlan)}
                             onClick={(
                               event
                             ) => {
@@ -13681,19 +13613,7 @@ function App() {
                             Reuse
                           </button>
 
-                          <button
-                            className="button button-danger inline-button"
-                            onClick={(
-                              event
-                            ) => {
-                              event.stopPropagation()
-                              deleteCompletedHistoryService(
-                                servicePlan
-                              )
-                            }}
-                          >
-                            Delete
-                          </button>
+
                         </div>
                       </div>
                     )
@@ -13729,6 +13649,7 @@ function App() {
                 <div className="playlist-detail-body">
                   {selectedHistoryServicePlan ? (
                     <div className="history-service-detail">
+                      <p role="status">{historyPreservationMessage(selectedHistoryServicePlan)}</p>
                       <div className="history-service-summary">
                         <div className="history-service-meta-grid">
                           <div className="history-service-meta-item">
@@ -13779,6 +13700,7 @@ function App() {
                         <div className="playlist-primary-actions">
                           <button
                             className="button button-primary"
+                            disabled={!canReuseHistory(selectedHistoryServicePlan)}
                             onClick={() =>
                               openReuseServiceModal(
                                 selectedHistoryServicePlan
@@ -13789,16 +13711,7 @@ function App() {
                           </button>
                         </div>
 
-                        <button
-                          className="button button-danger"
-                          onClick={() =>
-                            deleteCompletedHistoryService(
-                              selectedHistoryServicePlan
-                            )
-                          }
-                        >
-                          Delete
-                        </button>
+
                       </div>
 
                       <div className="playlist-songs-panel">

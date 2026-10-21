@@ -1,3 +1,4 @@
+import { scopedStorage, storageEventKey, ScopedBroadcastChannel } from './browserScope.js'
 import { projectorId } from './networkProjector'
 const CHANNEL = 'church-song-projector'
 const PRESENCE_KEY = 'church-song-projector-presence'
@@ -7,10 +8,10 @@ const PONG = 'PROJECTOR_PONG'
 
 // Presence uses the existing channel, with the same storage-event fallback.
 function presenceTransport(onMessage) {
-  const channel = 'BroadcastChannel' in window ? new BroadcastChannel(CHANNEL) : null
+  const channel = 'BroadcastChannel' in window ? new ScopedBroadcastChannel(CHANNEL) : null
   const receive = (event) => onMessage(event.data)
   const storage = (event) => {
-    if (event.key !== PRESENCE_KEY || !event.newValue) return
+    if (storageEventKey(event) !== PRESENCE_KEY || !event.newValue) return
     try { onMessage(JSON.parse(event.newValue)) } catch { /* Ignore malformed messages. */ }
   }
   channel?.addEventListener('message', receive)
@@ -20,7 +21,7 @@ function presenceTransport(onMessage) {
       if (channel) channel.postMessage(message)
       else {
         try {
-          localStorage.setItem(PRESENCE_KEY, JSON.stringify({ ...message, nonce: projectorId() }))
+          scopedStorage.setItem(PRESENCE_KEY, JSON.stringify({ ...message, nonce: projectorId() }))
         } catch { /* The handshake times out when neither transport is available. */ }
       }
     },

@@ -11,11 +11,14 @@ const { spawn, execFileSync } = require('node:child_process');
   const out = path.join(temp, 'ui');
   execFileSync('npm', ['run','build','--','--outDir',out], { cwd:root, stdio:'pipe' });
   const log = fs.openSync(path.join(temp,'server.log'),'w');
-  const port = 18089;
+  const port = Number(process.env.NETWORK_TEST_PORT || 18089);
   const host = process.env.NETWORK_TEST_HOST || '127.0.0.1';
+  execFileSync('python3', [process.env.API_MIGRATION_TOOL || path.resolve(root, '../church-song-api/tools/migrate_standalone.py'),
+    '--database', path.join(temp, 'test.db'), '--apply', '--disposable'], { stdio: 'pipe' });
   const server = spawn(process.env.JAVA || 'java', ['-jar',
-    path.resolve(root,'../church-song-api/target/church-song-api-0.0.1-SNAPSHOT.jar'),
-    ...(process.env.NETWORK_TEST_LAN_DEV ? ['--spring.profiles.active=lan-dev'] : []),
+    path.resolve(process.env.API_TEST_JAR || path.join(root,'../church-song-api/target/church-song-api-0.0.1-SNAPSHOT.jar')),
+    ...(process.env.NETWORK_TEST_LAN_DEV ? ['--spring.profiles.active=standalone,lan-dev'] : ['--spring.profiles.active=standalone']),
+    '--churchsong.auth.standalone=true', '--server.servlet.session.cookie.secure=false',
     '--server.address='+(process.env.NETWORK_TEST_MDNS ? '0.0.0.0' : host), '--server.port='+port,
     ...(process.env.NETWORK_TEST_MDNS ? ['--churchsong.discovery.enabled=true',
       '--churchsong.discovery.hostname='+process.env.NETWORK_TEST_MDNS] : []),
@@ -54,6 +57,10 @@ const { spawn, execFileSync } = require('node:child_process');
     }
     console.log('PASS real HTTP/WebSocket origin policy, lan-dev='+!!process.env.NETWORK_TEST_LAN_DEV);
     browser=await chromium.launch({headless:true});
+    if (process.env.HISTORY_ONLY) {
+      await require('./historyPreservation.cjs')(browser, serverOrigin);
+      return;
+    }
     const errors=[], commands=[];
     const songs=[1,2].map(id=>({id,title:'Song '+id,language:'ENGLISH',lyrics:`[Verse 1]\nSong ${id} first section\n[Verse 2]\nSong ${id} second section\n[Verse 3]\nSong ${id} third section`,type:'SLOW'}));
     const events=Array.from({length:10},(_,i)=>({id:i+1,title:'Event '+(i+1),eventDate:'2099-09-17',startTime:'12:00',birthdayEntries:[]}));
@@ -68,7 +75,7 @@ const { spawn, execFileSync } = require('node:child_process');
       const origin='http://'+host+':'+port;
       await context.route(origin+'/**',async route=>{
         const url=new URL(route.request().url()),p=url.pathname;
-        if(p.startsWith('/projector/') || p==='/notes' || p.startsWith('/notes/'))return route.continue();
+        if(p.startsWith('/auth/') || p.startsWith('/projector/') || p==='/notes' || p.startsWith('/notes/'))return route.continue();
         if(p==='/'||p.startsWith('/assets/')||p.endsWith('.svg'))return route.continue();
         let data=[];
         if(p==='/songs')data=songs;
@@ -83,6 +90,8 @@ const { spawn, execFileSync } = require('node:child_process');
         return route.fulfill({json:data});
       });
       const page=await context.newPage();
+      page.setDefaultTimeout(15000);
+      page.setDefaultNavigationTimeout(30000);
       page.on('pageerror',e=>errors.push(e.message));
       page.on('websocket',ws=>ws.on('framesent',f=>{if (!f.payload || typeof f.payload !== 'string') return; let msg;try {msg=JSON.parse(f.payload)} catch {return} if(msg.type==='COMMAND')commands.push(msg)}));
       // Keep a test-only handle for simulating a dropped socket, without replacing transport.
@@ -193,8 +202,11 @@ const { spawn, execFileSync } = require('node:child_process');
     await p.getByText('Bible verse 2',{exact:false}).first().waitFor();
     console.log('PASS extended connection session and 35-second frozen operator/projector: same sockets, current display preserved');
     await require('./bibleProjectorLayout.cjs')(o,p,serverOrigin);
+    console.log('SCENARIO hat1985Projection');
     await require('./hat1985Projection.cjs')(o,p,serverOrigin);
+    console.log('SCENARIO trilingualBible');
     await require('./trilingualBible.cjs')(o,p);
+    await require('./historyPreservation.cjs')(browser,serverOrigin);
     await remote.context.close();await p.locator('.bible-projector-verse').first().waitFor();
     assert.equal(await windows.context.pages().length,1,'Remote send does not open duplicate projector');
     assert.deepEqual(errors,[]);

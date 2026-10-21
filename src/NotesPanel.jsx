@@ -1,3 +1,4 @@
+import { scopedStorage } from './browserScope.js'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { noteValidation } from './operatorFeatures'
@@ -10,7 +11,7 @@ import { ARCHIVE_LIMIT, archivePayload } from './noteArchive'
 const memory = new Map()
 function readNotes(key) {
   try {
-    const value = JSON.parse(localStorage.getItem(key) || 'null')
+    const value = JSON.parse(scopedStorage.getItem(key) || 'null')
     if (value && typeof value.draft === 'string' && Array.isArray(value.history)) return { archive: value.archive || {}, draft: value.draft.slice(0, ARCHIVE_LIMIT), history: value.history.filter(note => typeof note?.text === 'string' && typeof note?.at === 'string').slice(0, 50) }
   } catch { /* Continue with the current browser session when storage is unavailable. */ }
   return memory.get(key) || { draft: '', history: [] }
@@ -51,7 +52,7 @@ export default function NotesPanel({ serviceKey, onSend, previewBackgroundClass,
   const [sending, setSending] = useState(false)
   function save(value) {
     latestSaved.current = value; setSaved(value); memory.set(key, value)
-    try { localStorage.setItem(key, JSON.stringify(value)); setMessage('') }
+    try { scopedStorage.setItem(key, JSON.stringify(value)); setMessage('') }
     catch { setMessage('Browser storage is unavailable. Copy your notes before closing or refreshing this page.') }
   }
   async function send() {
